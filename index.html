@@ -280,14 +280,21 @@ function save(){sset('rt_data_'+user,JSON.stringify(data))}
 
 /* ---------- file storage (IndexedDB, with in-memory fallback) ---------- */
 /* ---------- Supabase Cloud Configuration & File Storage ---------- */
-const SUPABASE_URL = 'sb_publishable_tmISJTKk8LhlNS6WhyXvYw_AmA0mBTZ';
-const SUPABASE_KEY = 'sb_secret_cTCLhi0EUAqvIt1382EtWA_dXPz39-p';
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_URL = 'https://oerrbarwufepovjqplbw.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_tmISJTKk8LhlNS6WhyXvYw_AmA0mBTZ';
+let supabaseClient = null;
+
+function initSupabase() {
+  if (window.supabase && !supabaseClient) {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+}
 
 let formFiles = [], removedFiles = [];
 const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 
 async function fput(id, file) {
+  initSupabase();
   const filePath = `${user}/${id}_${file.name}`;
   const { data, error } = await supabaseClient.storage
     .from('invoices')
@@ -301,6 +308,7 @@ async function fput(id, file) {
 
 async function fdel(path) {
   if (!path) return;
+  initSupabase();
   const relativePath = path.includes('/invoices/') ? path.split('/invoices/')[1] : path;
   await supabaseClient.storage.from('invoices').remove([relativePath]);
 }
