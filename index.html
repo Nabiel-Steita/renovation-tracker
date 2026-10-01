@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Renovation Tracker</title>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--text:#1c2430;--muted:#6b7686;--line:#e3e6eb;
+  --accent:#2563eb;--accent-text:#fff;--good:#15803d;--bad:#b91c1c;--warn:#b45309;
+  --good-bg:#dcfce7;--bad-bg:#fee2e2;--warn-bg:#fef3c7;--bar:#93b4f5;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12161c;--card:#1b212a;--text:#e8ecf2;--muted:#9aa5b5;--line:#2a323d;
+    --accent:#4c8dff;--accent-text:#0b1220;--good:#4ade80;--bad:#f87171;--warn:#fbbf24;
+    --good-bg:#12361f;--bad-bg:#3b1717;--warn-bg:#3a2a0c;--bar:#365fb5;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12161c;--card:#1b212a;--text:#e8ecf2;--muted:#9aa5b5;--line:#2a323d;
+  --accent:#4c8dff;--accent-text:#0b1220;--good:#4ade80;--bad:#f87171;--warn:#fbbf24;
+  --good-bg:#12361f;--bad-bg:#3b1717;--warn-bg:#3a2a0c;--bar:#365fb5;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:15px;line-height:1.4}
+h1,h2,h3{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-top:4px}
+textarea{resize:vertical;min-height:60px}
+label{display:block;font-size:13px;color:var(--muted);margin-top:12px}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);padding:9px 14px;border-radius:10px}
+button.primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:600}
+button.danger{color:var(--bad)}
+button.small{padding:5px 10px;font-size:13px}
+.hidden{display:none!important}
+.wrap{max-width:980px;margin:0 auto;padding:12px 14px 90px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:700px){.g4{grid-template-columns:repeat(2,1fr)}.g2.keep{grid-template-columns:1fr}}
+.stat .v{font-size:20px;font-weight:700;margin-top:2px}
+.stat .l{font-size:12px;color:var(--muted)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:5}
+nav button{border:none;background:none;flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted);padding:6px 2px}
+nav button .i{font-size:19px}
+nav button.on{color:var(--accent);font-weight:600}
+@media(min-width:900px){
+  nav{position:static;border:1px solid var(--line);border-radius:14px;margin:0 0 12px;padding:4px}
+  nav button{flex-direction:row;justify-content:center;gap:8px;font-size:14px}
+}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.b-good{background:var(--good-bg);color:var(--good)}
+.b-bad{background:var(--bad-bg);color:var(--bad)}
+.b-warn{background:var(--warn-bg);color:var(--warn)}
+.b-muted{background:var(--line);color:var(--muted)}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.item{border-top:1px solid var(--line);padding:12px 0}
+.item:first-child{border-top:none}
+.muted{color:var(--muted);font-size:13px}
+.amt{font-weight:700;white-space:nowrap}
+.actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.bar{height:10px;background:var(--bar);border-radius:5px;min-width:2px}
+.brow{margin:8px 0}
+.brow .t{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px}
+.filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px}
+@media(max-width:700px){.filters{grid-template-columns:1fr 1fr}.filters input{grid-column:1/3}}
+.seg{display:flex;gap:8px;margin-top:4px}
+.seg label{flex:1;margin:0;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center;color:var(--text);cursor:pointer;font-size:14px}
+.seg input{display:none}
+.seg label.sel{border-color:var(--accent);background:var(--accent);color:var(--accent-text);font-weight:600}
+.auth{max-width:380px;margin:8vh auto;padding:0 14px}
+.err{color:var(--bad);font-size:13px;margin-top:8px;min-height:18px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.overlay .card{width:100%;max-width:400px;margin:0}
+.empty{text-align:center;color:var(--muted);padding:24px 8px}
+h2{font-size:18px;margin-bottom:6px}
+h3{font-size:15px;margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;border:1px solid var(--line);border-radius:99px;padding:5px 6px 5px 11px;font-size:13px;background:var(--bg)}
+.chip .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.chip .s{color:var(--muted);font-size:11px}
+.chip .x{border:none;background:none;padding:0 6px;color:var(--bad);font-size:15px;line-height:1}
+button.chipbtn{border-radius:99px;padding:5px 11px;font-size:13px;max-width:100%}
+button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+</style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="auth" class="auth hidden">
+  <div class="card">
+    <h2 id="authTitle">🏠 Renovation Tracker</h2>
+    <p class="muted" id="authSub">Log in to see your expenses.</p>
+    <label>Name<input id="aName" autocomplete="username"></label>
+    <label>Password<input id="aPass" type="password" autocomplete="current-password"></label>
+    <label id="aPass2Wrap" class="hidden">Repeat password<input id="aPass2" type="password" autocomplete="new-password"></label>
+    <div class="err" id="aErr"></div>
+    <button class="primary" style="width:100%;margin-top:6px" id="aBtn">Log in</button>
+    <p class="muted" style="text-align:center;margin-top:14px"><a href="#" id="aSwitch" style="color:var(--accent)">No account? Register</a></p>
+    <p class="muted" style="font-size:12px">Your data is saved only in this browser on this device.</p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="wrap hidden">
+  <div class="top">
+    <h1 style="font-size:19px">🏠 Renovation Tracker</h1>
+    <div><span class="muted" id="who"></span> <button class="small" onclick="logout()">Log out</button></div>
+  </div>
+
+  <nav id="nav">
+    <button data-v="dash" class="on"><span class="i">📊</span>Dashboard</button>
+    <button data-v="add"><span class="i">➕</span>Add</button>
+    <button data-v="list"><span class="i">🧾</span>Expenses</button>
+    <button data-v="owed"><span class="i">💰</span>Owed</button>
+    <button data-v="settings"><span class="i">⚙️</span>Settings</button>
+  </nav>
+
+  <!-- DASHBOARD -->
+  <section id="v-dash"></section>
+
+  <!-- ADD -->
+  <section id="v-add" class="hidden">
+    <div class="card">
+      <h2 id="formTitle">Add expense</h2>
+      <div class="grid g2 keep">
+        <label>Date<input type="date" id="f_date"></label>
+        <label>Amount (LYD)<input type="number" inputmode="decimal" step="0.01" min="0" id="f_amount" placeholder="0.00"></label>
+      </div>
+      <div class="grid g2 keep">
+        <label>Room<select id="f_room"></select></label>
+        <label>Category<select id="f_cat"></select></label>
+      </div>
+      <label id="l_desc">What was it?<input id="f_desc" placeholder="e.g. Floor tiles 60x60"></label>
+      <label id="l_payee">Shop / person name<input id="f_payee" placeholder="e.g. Al-Nour Tiles"></label>
+
+      <label>Who bought / arranged it?</label>
+      <div class="seg" id="seg_by">
+        <label data-val="me"><input type="radio" name="by" value="me">Me</label>
+        <label data-val="saied"><input type="radio" name="by" value="saied">Saied (engineer)</label>
+      </div>
+      <div class="muted" id="commNote" style="margin-top:6px"></div>
+
+      <label>Payment status</label>
+      <select id="f_status">
+        <option value="paid">✅ Paid (by me)</option>
+        <option value="saied">🟠 Saied paid for me (I owe him)</option>
+        <option value="unpaid">🔴 Not paid yet (I owe the shop / person)</option>
+      </select>
+
+      <div class="grid g2 keep">
+        <label>Payment method<select id="f_method"></select></label>
+        <label id="l_dummy" style="visibility:hidden">.</label>
+      </div>
+      <div id="methodFields"></div>
+
+      <label>Notes<textarea id="f_notes" placeholder="Anything else..."></textarea></label>
+
+      <label>Invoices / transaction receipts (any file type, as many as you want)</label>
+      <button type="button" style="width:100%;margin-top:4px" onclick="$('f_files').click()">📎 Attach files</button>
+      <input type="file" id="f_files" multiple class="hidden">
+      <div class="chips" id="fileList"></div>
+      <div class="err" id="fErr"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="primary" style="flex:1" onclick="saveExpense()">Save</button>
+        <button onclick="resetForm();show('list')">Cancel</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIST -->
+  <section id="v-list" class="hidden">
+    <div class="card">
+      <div class="filters">
+        <input id="q" placeholder="Search name, item, notes...">
+        <select id="fl_room"></select>
+        <select id="fl_cat"></select>
+        <select id="fl_status">
+          <option value="">Any status</option>
+          <option value="paid">Paid</option>
+          <option value="saied">Owed to Saied</option>
+          <option value="unpaid">Owed to shop/person</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:10px"><span class="muted" id="listCount"></span><button class="small" onclick="exportCSV()">⬇ Export Excel (CSV)</button></div>
+    </div>
+    <div class="card" id="listBox"></div>
+  </section>
+
+  <!-- OWED -->
+  <section id="v-owed" class="hidden"></section>
+
+  <!-- SETTINGS -->
+  <section id="v-settings" class="hidden">
+    <div class="card">
+      <h2>Engineer</h2>
+      <label>Name<input id="s_name"></label>
+      <label>Commission % (added on top of anything he buys / arranges)<input type="number" id="s_rate" min="0" step="0.5"></label>
+      <p class="muted">Changing the % only affects new expenses. Old ones keep the % they were saved with.</p>
+      <button class="primary" onclick="saveSettings()">Save settings</button>
+    </div>
+    <div class="card">
+      <h2>Backup</h2>
+      <p class="muted">Data lives only in this browser. Download a backup now and then. The backup contains your expenses but not the attached files, so keep the original invoices too.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="exportJSON()">⬇ Download backup</button>
+        <button onclick="document.getElementById('impFile').click()">⬆ Restore backup</button>
+        <button onclick="exportCSV()">⬇ Export Excel (CSV)</button>
+        <input type="file" id="impFile" accept=".json" class="hidden">
+      </div>
+    </div>
+    <div class="card">
+      <h2>Danger zone</h2>
+      <button class="danger" onclick="wipe()">Delete all my expenses</button>
+    </div>
+  </section>
+</div>
+
+<!-- FILE VIEWER -->
+<div id="viewer" class="overlay hidden" onclick="closeViewer()">
+  <div class="card" style="max-width:900px;text-align:center" onclick="event.stopPropagation()">
+    <div class="row"><b id="vName" style="word-break:break-all;text-align:left"></b><button class="small" onclick="closeViewer()">Close</button></div>
+    <img id="vImg" alt="" style="max-width:100%;max-height:68vh;margin-top:10px;border-radius:8px">
+    <div class="actions" style="justify-content:center"><button class="small primary" id="vSave">⬇ Save file</button></div>
+  </div>
+</div>
+
+<!-- SETTLE DIALOG -->
+<div id="dlg" class="overlay hidden">
+  <div class="card">
+    <h2 id="dTitle">Mark as paid</h2>
+    <p class="muted" id="dInfo"></p>
+    <label>Date<input type="date" id="d_date"></label>
+    <label>Paid by<select id="d_method"></select></label>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="primary" style="flex:1" onclick="confirmSettle()">Confirm</button>
+      <button onclick="closeDlg()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- constants ---------- */
+const ROOMS=['Kitchen','Bedroom 1','Bedroom 2','Main bedroom','Living room','Guest room','Waiting hall','Shoe hall','Main bathroom','Guest bathroom','Whole apartment'];
+const CATS=['Materials','Labor','Services','Other'];
+const METHODS={
+  cash:{name:'Cash',f:[['Received by (optional)','']]},
+  bank:{name:'Bank transfer',f:[['Bank name',''],['Reference / transaction no.','']]},
+  lypay:{name:'LY Pay',f:[['Phone / account',''],['Transaction no.','']]},
+  onepay:{name:'One Pay',f:[['Phone / account',''],['Transaction no.','']]},
+  edfaliy:{name:'Edfaliy',f:[['Phone / account',''],['Transaction no.','']]},
+  internal:{name:'Internal transfer',f:[['From account',''],['To account','']]},
+  other:{name:'Other',f:[['Method name',''],['Details','']]}
+};
+const STATUS_LABEL={paid:'Paid',saied:'Owed to Saied',unpaid:'Not paid'};
+
+/* ---------- storage (safe) ---------- */
+const mem={};
+function sget(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}}
+function sset(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}
+function sdel(k){try{localStorage.removeItem(k)}catch(e){delete mem[k]}}
+function jget(k,d){try{const v=sget(k);return v?JSON.parse(v):d}catch(e){return d}}
+
+/* ---------- state ---------- */
+let user=null, data={settings:{engineer:'Saied',rate:20},expenses:[]}, editId=null, settleT=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>(Math.round((n||0)*100)/100).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2})+' LYD';
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const eng=()=>data.settings.engineer||'Saied';
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function save(){sset('rt_data_'+user,JSON.stringify(data))}
+
+/* ---------- file storage (IndexedDB, with in-memory fallback) ---------- */
+let idb=null, idbTried=false; const memFiles=new Map();
+let formFiles=[], removedFiles=[];
+function dbOpen(){return new Promise(res=>{try{const r=indexedDB.open('rt_files',1);r.onupgradeneeded=()=>r.result.createObjectStore('f');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);r.onblocked=()=>res(null)}catch(e){res(null)}})}
+async function getDB(){if(!idbTried){idbTried=true;idb=await dbOpen()}return idb}
+async function fput(id,blob){const d=await getDB();if(!d){memFiles.set(id,blob);return}
+  return new Promise((res,rej)=>{const tx=d.transaction('f','readwrite');tx.objectStore('f').put(blob,id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)})}
+async function fget(id){const d=await getDB();if(!d)return memFiles.get(id)||null;
+  return new Promise(res=>{try{const r=d.transaction('f').objectStore('f').get(id);r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null)}catch(e){res(null)}})}
+async function fdel(id){const d=await getDB();if(!d){memFiles.delete(id);return}
+  return new Promise(res=>{try{const tx=d.transaction('f','readwrite');tx.objectStore('f').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>res()}catch(e){res()}})}
+const fsize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+
+/* ---------- saving files out (download) ---------- */
+async function saveOut(name,data){
+  let d=null; try{ if(window.claude&&claude.use) d=await claude.use('downloads') }catch(e){}
+  if(d){
+    try{await d.save({filename:name,data});return}
+    catch(e){
+      if(e&&e.code==='declined')return;
+      if(e&&e.code==='rejected_extension'){alert('This file type cannot be saved from this preview page. It will work once the tracker is on your own domain.');return}
+    }
+  }
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch(e){}
+}
+
+/* ---------- attachments UI ---------- */
+function renderFormFiles(){
+  $('fileList').innerHTML=formFiles.map((f,i)=>`<span class="chip">📎 <span class="n">${esc(f.name)}</span><span class="s">${fsize(f.size)}</span><button type="button" class="x" onclick="removeFormFile(${i})" aria-label="Remove">✕</button></span>`).join('');
+}
+function removeFormFile(i){const f=formFiles[i];if(f&&!f.blob)removedFiles.push(f.id);formFiles.splice(i,1);renderFormFiles()}
+$('f_files').onchange=ev=>{
+  [...ev.target.files].forEach(file=>formFiles.push({id:uid(),name:file.name,type:file.type||'',size:file.size,blob:file}));
+  ev.target.value='';renderFormFiles();
+};
+let viewerUrl=null;
+async function openFile(id){
+  let meta=null;data.expenses.some(e=>(e.files||[]).some(f=>f.id===id&&(meta=f)));
+  if(!meta)return;
+  const blob=await fget(id);
+  if(!blob){alert('This file is not stored on this device (it may have been added from another device or cleared with the browser data).');return}
+  const isImg=(meta.type||'').startsWith('image/')&&!/heic|heif|tiff/i.test(meta.type);
+  if(!isImg){await saveOut(meta.name,blob);return}
+  if(viewerUrl)URL.revokeObjectURL(viewerUrl);
+  viewerUrl=URL.createObjectURL(blob);
+  $('vName').textContent=meta.name;$('vImg').src=viewerUrl;
+  $('vSave').onclick=()=>saveOut(meta.name,blob);
+  $('viewer').classList.remove('hidden');
+}
+function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');if(viewerUrl){URL.revokeObjectURL(viewerUrl);viewerUrl=null}}
+
+/* ---------- auth ---------- */
+let regMode=false;
+async function hash(pw,salt){
+  try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(salt+pw));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+  catch(e){return btoa(unescape(encodeURIComponent(salt+pw)))}
+}
+function setAuthMode(r){
+  regMode=r;
+  $('aPass2Wrap').classList.toggle('hidden',!r);
+  $('aBtn').textContent=r?'Register':'Log in';
+  $('aSwitch').textContent=r?'Have an account? Log in':'No account? Register';
+  $('authSub').textContent=r?'Create your account (saved on this device).':'Log in to see your expenses.';
+  $('aErr').textContent='';
+}
+$('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};
+$('aBtn').onclick=async()=>{
+  const name=$('aName').value.trim(), pw=$('aPass').value, err=$('aErr');
+  const users=jget('rt_users',{});
+  const key=name.toLowerCase();
+  if(!name||!pw){err.textContent='Enter name and password.';return}
+  if(regMode){
+    if(pw.length<4){err.textContent='Password must be at least 4 characters.';return}
+    if(pw!==$('aPass2').value){err.textContent='Passwords do not match.';return}
+    if(users[key]){err.textContent='This name already exists.';return}
+    const salt=uid();
+    users[key]={name,salt,hash:await hash(pw,salt)};
+    sset('rt_users',JSON.stringify(users));
+    enter(key,name);
+  }else{
+    const u=users[key];
+    if(!u||u.hash!==await hash(pw,u.salt)){err.textContent='Wrong name or password.';return}
+    enter(key,u.name);
+  }
+};
+['aName','aPass','aPass2'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')$('aBtn').click()}));
+function enter(key,name){
+  user=key; sset('rt_session',key);
+  data=jget('rt_data_'+key,null)||{settings:{engineer:'Saied',rate:20},expenses:[]};
+  data.settings=Object.assign({engineer:'Saied',rate:20},data.settings);
+  $('who').textContent=name;
+  $('auth').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('aPass').value='';$('aPass2').value='';
+  initForm(); show('dash');
+}
+function logout(){sdel('rt_session');user=null;$('app').classList.add('hidden');$('auth').classList.remove('hidden');setAuthMode(false)}
+
+/* ---------- navigation ---------- */
+function show(v){
+  ['dash','add','list','owed','settings'].forEach(x=>$('v-'+x).classList.toggle('hidden',x!==v));
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  if(v==='dash')renderDash(); if(v==='list')renderList(); if(v==='owed')renderOwed();
+  if(v==='settings'){$('s_name').value=data.settings.engineer;$('s_rate').value=data.settings.rate}
+  if(v==='add'&&!editId)resetForm();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{ if(b.dataset.v!=='add')editId=null; show(b.dataset.v)});
+
+/* ---------- form ---------- */
+function opts(arr,first){return (first?`<option value="">${first}</option>`:'')+arr.map(a=>`<option>${esc(a)}</option>`).join('')}
+function initForm(){
+  $('f_room').innerHTML=opts(ROOMS);
+  $('f_cat').innerHTML=opts(CATS);
+  const mo=Object.entries(METHODS).map(([k,m])=>`<option value="${k}">${m.name}</option>`).join('');
+  $('f_method').innerHTML=mo; $('d_method').innerHTML=mo;
+  $('fl_room').innerHTML=opts(ROOMS,'All rooms'); $('fl_cat').innerHTML=opts(CATS,'All categories');
+  resetForm();
+}
+function renderMethodFields(vals){
+  const m=METHODS[$('f_method').value];
+  $('methodFields').innerHTML=`<div class="grid g2 keep">`+m.f.map((f,i)=>`<label>${f[0]}<input id="mf${i}" value="${esc(vals?vals[i]:'')}"></label>`).join('')+`</div>`;
+}
+function updateCatLabels(){
+  const lab=$('f_cat').value==='Labor';
+  $('l_desc').firstChild.nodeValue=lab?'Job done (e.g. painting, plumbing)':'What was it?';
+  $('l_payee').firstChild.nodeValue=lab?'Worker name':'Shop / person name';
+}
+function updateCommNote(){
+  const by=document.querySelector('input[name=by]:checked').value;
+  const a=parseFloat($('f_amount').value)||0;
+  $('commNote').innerHTML=by==='saied'?`${esc(eng())} gets ${data.settings.rate}% on top${a?` = <b>${money(a*data.settings.rate/100)}</b>`:''}.`:'No commission when you bought it yourself.';
+  document.querySelectorAll('#seg_by label').forEach(l=>l.classList.toggle('sel',l.dataset.val===by));
+}
+$('f_method').onchange=()=>renderMethodFields();
+$('f_cat').onchange=updateCatLabels;
+$('f_amount').oninput=updateCommNote;
+document.querySelectorAll('input[name=by]').forEach(r=>r.onchange=updateCommNote);
+function resetForm(){
+  editId=null; formFiles=[]; removedFiles=[]; renderFormFiles();
+  $('formTitle').textContent='Add expense';
+  $('f_date').value=today(); $('f_amount').value=''; $('f_desc').value=''; $('f_payee').value=''; $('f_notes').value='';
+  $('f_room').selectedIndex=0; $('f_cat').selectedIndex=0; $('f_status').value='paid'; $('f_method').value='cash';
+  document.querySelector('input[name=by][value=me]').checked=true;
+  $('fErr').textContent='';
+  renderMethodFields(); updateCatLabels(); updateCommNote();
+}
+async function saveExpense(){
+  const amount=parseFloat($('f_amount').value);
+  if(!(amount>0)){$('fErr').textContent='Enter a valid amount.';return}
+  if(!$('f_desc').value.trim()&&!$('f_payee').value.trim()){$('fErr').textContent='Write what it was or the name.';return}
+  const by=document.querySelector('input[name=by]:checked').value;
+  const m=$('f_method').value;
+  const details=METHODS[m].f.map((_,i)=>$('mf'+i).value.trim());
+  const old=editId?data.expenses.find(e=>e.id===editId):null;
+  const rate=old&&old.boughtBy===by&&old.rate!=null?old.rate:data.settings.rate;
+  const e={
+    id:old?old.id:uid(), date:$('f_date').value||today(), amount, room:$('f_room').value, category:$('f_cat').value,
+    desc:$('f_desc').value.trim(), payee:$('f_payee').value.trim(), boughtBy:by, rate,
+    commission:by==='saied'?Math.round(amount*rate)/100:0,
+    commPaid:old&&by==='saied'?old.commPaid:false, commMethod:old?old.commMethod:'', commDate:old?old.commDate:'',
+    status:$('f_status').value, method:m, details, notes:$('f_notes').value.trim(), settledDate:old?old.settledDate:''
+  };
+  e.files=formFiles.map(f=>({id:f.id,name:f.name,type:f.type,size:f.size}));
+  try{
+    for(const f of formFiles){ if(f.blob) await fput(f.id,f.blob) }
+    for(const id of removedFiles){ await fdel(id) }
+  }catch(err){ $('fErr').textContent='Could not store the files on this device (storage may be full). Try fewer or smaller files.'; return }
+  if(old)data.expenses[data.expenses.indexOf(old)]=e; else data.expenses.push(e);
+  save(); editId=null; resetForm(); show('list');
+}
+function editExpense(id){
+  const e=data.expenses.find(x=>x.id===id); if(!e)return;
+  show('add'); editId=id;
+  $('formTitle').textContent='Edit expense';
+  $('f_date').value=e.date; $('f_amount').value=e.amount; $('f_room').value=e.room; $('f_cat').value=e.category;
+  $('f_desc').value=e.desc; $('f_payee').value=e.payee; $('f_notes').value=e.notes;
+  $('f_status').value=e.status; $('f_method').value=e.method;
+  document.querySelector(`input[name=by][value=${e.boughtBy}]`).checked=true;
+  renderMethodFields(e.details); updateCatLabels(); updateCommNote();
+  formFiles=(e.files||[]).map(f=>({...f})); removedFiles=[]; renderFormFiles();
+}
+function delExpense(id){
+  if(!confirm('Delete this expense (and its attached files)?'))return;
+  const e=data.expenses.find(x=>x.id===id); if(e)(e.files||[]).forEach(f=>fdel(f.id));
+  data.expenses=data.expenses.filter(x=>x.id!==id);save();rerender();
+}
+
+/* ---------- calculations ---------- */
+function totals(list){
+  const t={items:0,comm:0,paid:0,owedSaiedItems:0,owedSaiedComm:0,owedShops:0};
+  list.forEach(e=>{
+    t.items+=e.amount; t.comm+=e.commission;
+    if(e.status==='paid')t.paid+=e.amount;
+    if(e.status==='saied')t.owedSaiedItems+=e.amount;
+    if(e.status==='unpaid')t.owedShops+=e.amount;
+    if(e.commission){ if(e.commPaid)t.paid+=e.commission; else t.owedSaiedComm+=e.commission }
+  });
+  t.total=t.items+t.comm; t.owedSaied=t.owedSaiedItems+t.owedSaiedComm; t.owedAll=t.owedSaied+t.owedShops;
+  return t;
+}
+function groupSum(list,keyFn,valFn){
+  const m={}; list.forEach(e=>{const k=keyFn(e)||'—'; m[k]=(m[k]||0)+valFn(e)});
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+}
+function bars(rows){
+  if(!rows.length)return '<div class="muted">No data yet.</div>';
+  const max=Math.max(...rows.map(r=>r[1]))||1;
+  return rows.map(r=>`<div class="brow"><div class="t"><span>${esc(r[0])}</span><b>${money(r[1])}</b></div><div class="bar" style="width:${Math.max(2,r[1]/max*100)}%"></div></div>`).join('');
+}
+
+/* ---------- dashboard ---------- */
+function renderDash(){
+  const L=data.expenses, t=totals(L);
+  if(!L.length){ $('v-dash').innerHTML=`<div class="card empty"><h2>Welcome 👋</h2><p>No expenses yet. Tap <b>Add</b> to register your first one.</p><button class="primary" onclick="show('add')">➕ Add expense</button></div>`;return }
+  const cost=e=>e.amount+e.commission;
+  $('v-dash').innerHTML=`
+  <div class="grid g4">
+    <div class="card stat"><div class="l">Total spent (incl. commission)</div><div class="v">${money(t.total)}</div></div>
+    <div class="card stat"><div class="l">Paid so far</div><div class="v" style="color:var(--good)">${money(t.paid)}</div></div>
+    <div class="card stat"><div class="l">Still to pay</div><div class="v" style="color:var(--bad)">${money(t.owedAll)}</div></div>
+    <div class="card stat"><div class="l">${esc(eng())}'s commission</div><div class="v">${money(t.comm)}</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h3>You owe ${esc(eng())}</h3><div class="v" style="font-size:22px;font-weight:700">${money(t.owedSaied)}</div>
+      <div class="muted">Things he paid for: ${money(t.owedSaiedItems)}<br>Unpaid commission: ${money(t.owedSaiedComm)}</div></div>
+    <div class="card"><h3>You owe shops / workers</h3><div class="v" style="font-size:22px;font-weight:700">${money(t.owedShops)}</div>
+      <div class="muted">Items not paid yet. <a href="#" onclick="show('owed');return false" style="color:var(--accent)">See details</a></div></div>
+  </div>
+  <div class="card"><h3>By room</h3>${bars(groupSum(L,e=>e.room,cost))}</div>
+  <div class="grid g2">
+    <div class="card"><h3>By category</h3>${bars(groupSum(L,e=>e.category,cost))}</div>
+    <div class="card"><h3>By payment method</h3>${bars(groupSum(L,e=>METHODS[e.method]?.name,cost))}</div>
+  </div>
+  <div class="card"><h3>Who bought</h3>${bars(groupSum(L,e=>e.boughtBy==='me'?'Me':eng(),e=>e.amount))}</div>`;
+}
+
+/* ---------- list ---------- */
+function methodText(e){
+  const m=METHODS[e.method]; if(!m)return '';
+  const d=(e.details||[]).filter(Boolean).join(' · ');
+  return m.name+(d?` (${esc(d)})`:'');
+}
+function itemHTML(e,opt={}){
+  const st={paid:'b-good',saied:'b-warn',unpaid:'b-bad'}[e.status];
+  let h=`<div class="item"><div class="row"><div style="min-width:0">
+    <b>${esc(e.desc||e.payee)}</b>${e.desc&&e.payee?` <span class="muted">· ${esc(e.payee)}</span>`:''}
+    <div class="muted">${esc(e.date)} · ${esc(e.room)} · ${esc(e.category)} · ${methodText(e)}</div>
+    <div style="margin-top:4px"><span class="badge ${st}">${STATUS_LABEL[e.status].replace('Saied',esc(eng()))}</span>
+    ${e.boughtBy==='saied'?`<span class="badge b-muted">Bought by ${esc(eng())}</span>`:''}
+    ${e.commission?`<span class="badge ${e.commPaid?'b-good':'b-warn'}">Commission ${money(e.commission)} ${e.commPaid?'paid':'unpaid'}</span>`:''}</div>
+    ${e.notes?`<div class="muted" style="margin-top:4px">📝 ${esc(e.notes)}</div>`:''}
+    ${(e.files&&e.files.length)?`<div class="chips">${e.files.map(f=>`<button class="small chipbtn" onclick="openFile('${f.id}')">📎 <span>${esc(f.name)}</span></button>`).join('')}</div>`:''}
+    </div><div class="amt">${money(e.amount)}</div></div><div class="actions">`;
+  if(e.status!=='paid')h+=`<button class="small primary" onclick="openSettle('${e.id}','item')">✔ Mark paid</button>`;
+  if(e.commission&&!e.commPaid)h+=`<button class="small" onclick="openSettle('${e.id}','comm')">💵 Pay commission</button>`;
+  if(!opt.noEdit)h+=`<button class="small" onclick="editExpense('${e.id}')">Edit</button><button class="small danger" onclick="delExpense('${e.id}')">Delete</button>`;
+  return h+`</div></div>`;
+}
+function filtered(){
+  const q=$('q').value.trim().toLowerCase(), r=$('fl_room').value, c=$('fl_cat').value, s=$('fl_status').value;
+  return data.expenses.filter(e=>
+    (!r||e.room===r)&&(!c||e.category===c)&&(!s||e.status===s)&&
+    (!q||[e.desc,e.payee,e.notes,e.room,e.category,...(e.details||[])].join(' ').toLowerCase().includes(q))
+  ).sort((a,b)=>b.date.localeCompare(a.date));
+}
+function renderList(){
+  const L=filtered();
+  $('listCount').textContent=`${L.length} expense${L.length===1?'':'s'} · ${money(L.reduce((s,e)=>s+e.amount,0))}`;
+  $('listBox').innerHTML=L.length?L.map(e=>itemHTML(e)).join(''):'<div class="empty">Nothing found.</div>';
+}
+['q','fl_room','fl_cat','fl_status'].forEach(i=>$(i).addEventListener('input',renderList));
+
+/* ---------- owed ---------- */
+function renderOwed(){
+  const L=data.expenses, t=totals(L);
+  const saiedItems=L.filter(e=>e.status==='saied');
+  const saiedComm=L.filter(e=>e.commission&&!e.commPaid);
+  const shops={}; L.filter(e=>e.status==='unpaid').forEach(e=>{const k=e.payee||'(no name)';(shops[k]=shops[k]||[]).push(e)});
+  let h=`<div class="card stat"><div class="l">Total you still have to pay</div><div class="v" style="color:var(--bad)">${money(t.owedAll)}</div></div>`;
+  h+=`<div class="card"><div class="row"><h2>Owed to ${esc(eng())}: ${money(t.owedSaied)}</h2>${t.owedSaied?`<button class="small primary" onclick="openSettle('','allsaied')">Pay all</button>`:''}</div>`;
+  if(!saiedItems.length&&!saiedComm.length)h+=`<div class="muted">You don't owe him anything. ✅</div>`;
+  if(saiedItems.length)h+=`<h3 style="margin-top:10px">Things he paid for (${money(t.owedSaiedItems)})</h3>`+saiedItems.map(e=>itemHTML(e,{noEdit:true})).join('');
+  if(saiedComm.length)h+=`<h3 style="margin-top:10px">Commission (${money(t.owedSaiedComm)})</h3>`+saiedComm.map(e=>`<div class="item"><div class="row"><div><b>${esc(e.desc||e.payee)}</b><div class="muted">${esc(e.date)} · ${money(e.amount)} × ${e.rate}%</div></div><div class="amt">${money(e.commission)}</div></div><div class="actions"><button class="small" onclick="openSettle('${e.id}','comm')">💵 Mark paid</button></div></div>`).join('');
+  h+=`</div>`;
+  h+=`<div class="card"><h2>Owed to shops / workers: ${money(t.owedShops)}</h2>`;
+  const names=Object.keys(shops);
+  if(!names.length)h+=`<div class="muted">Nothing unpaid. ✅</div>`;
+  names.forEach(n=>{const s=shops[n].reduce((a,e)=>a+e.amount,0);h+=`<h3 style="margin-top:12px">${esc(n)} — ${money(s)}</h3>`+shops[n].map(e=>itemHTML(e,{noEdit:true})).join('')});
+  $('v-owed').innerHTML=h+`</div>`;
+}
+
+/* ---------- settle ---------- */
+function openSettle(id,kind){
+  settleT={id,kind};
+  const e=data.expenses.find(x=>x.id===id);
+  $('d_date').value=today();
+  $('d_method').value=kind==='comm'||kind==='allsaied'?'cash':(e&&e.method)||'cash';
+  $('dTitle').textContent=kind==='comm'?'Pay commission':kind==='allsaied'?`Pay ${eng()} everything`:'Mark as paid';
+  $('dInfo').textContent=kind==='allsaied'?`Marks all items he paid for and all his unpaid commission as paid (${money(totals(data.expenses).owedSaied)}).`
+    :kind==='comm'?`${money(e.commission)} commission to ${eng()}`:`${money(e.amount)} — ${e.status==='saied'?'to '+eng():'to '+(e.payee||'shop')}`;
+  $('dlg').classList.remove('hidden');
+}
+function closeDlg(){$('dlg').classList.add('hidden');settleT=null}
+function confirmSettle(){
+  const {id,kind}=settleT, d=$('d_date').value||today(), m=$('d_method').value;
+  const doItem=e=>{e.status='paid';e.settledDate=d;e.method=m};
+  const doComm=e=>{e.commPaid=true;e.commDate=d;e.commMethod=m};
+  if(kind==='allsaied'){data.expenses.forEach(e=>{if(e.status==='saied')doItem(e);if(e.commission&&!e.commPaid)doComm(e)})}
+  else{const e=data.expenses.find(x=>x.id===id);if(e)kind==='comm'?doComm(e):doItem(e)}
+  save();closeDlg();rerender();
+}
+function rerender(){
+  if(!$('v-dash').classList.contains('hidden'))renderDash();
+  if(!$('v-list').classList.contains('hidden'))renderList();
+  if(!$('v-owed').classList.contains('hidden'))renderOwed();
+}
+
+/* ---------- settings / export ---------- */
+function saveSettings(){
+  data.settings.engineer=$('s_name').value.trim()||'Saied';
+  data.settings.rate=Math.max(0,parseFloat($('s_rate').value)||0);
+  save();alert('Saved ✅');updateCommNote();
+}
+function download(name,text,type){saveOut(name,text)}
+function exportCSV(){
+  const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
+  const head=['Date','Room','Category','Item / Job','Shop / Person','Amount LYD','Bought by','Commission %','Commission LYD','Commission paid','Status','Method','Details','Settled date','Notes'];
+  const rows=data.expenses.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(e=>[e.date,e.room,e.category,e.desc,e.payee,e.amount,e.boughtBy==='me'?'Me':eng(),e.boughtBy==='saied'?e.rate:'',e.commission||'',e.commission?(e.commPaid?'Yes':'No'):'',STATUS_LABEL[e.status],METHODS[e.method]?.name,(e.details||[]).join(' / '),e.settledDate,e.notes].map(q).join(','));
+  download('renovation-expenses.csv','\ufeff'+[head.map(q).join(','),...rows].join('\n'),'text/csv;charset=utf-8');
+}
+function exportJSON(){download('renovation-backup-'+today()+'.json',JSON.stringify(data,null,1),'application/json')}
+$('impFile').onchange=ev=>{
+  const f=ev.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{
+    const d=JSON.parse(r.result);
+    if(!Array.isArray(d.expenses))throw 0;
+    if(!confirm('Replace your current data with this backup?'))return;
+    data=d;data.settings=Object.assign({engineer:'Saied',rate:20},d.settings);save();show('dash');
+  }catch(e){alert('This file is not a valid backup.')}};
+  r.readAsText(f);ev.target.value='';
+};
+function wipe(){if(confirm('Delete ALL expenses and files? This cannot be undone.')&&confirm('Really sure?')){data.expenses.forEach(e=>(e.files||[]).forEach(f=>fdel(f.id)));data.expenses=[];save();show('dash')}}
+
+/* ---------- start ---------- */
+(function(){
+  const s=sget('rt_session'), users=jget('rt_users',{});
+  if(s&&users[s])enter(s,users[s].name);
+  else{ $('auth').classList.remove('hidden'); setAuthMode(Object.keys(users).length===0) }
+})();
+</script>
+</body>
+</html>
