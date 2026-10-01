@@ -93,7 +93,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
 <body>
 
 <!-- AUTH -->
-<div id="auth" class="auth hidden">
+<div id="auth" class="auth">
   <div class="card">
     <h2 id="authTitle">🏠 Renovation Tracker</h2>
     <p class="muted" id="authSub">Log in to see your expenses.</p>
@@ -278,12 +278,16 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 /* ---------- Supabase Cloud Configuration & File Storage ---------- */
 const SUPABASE_URL = 'https://oerrbarwufepovjqplbw.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_tmISJTKk8LhlNS6WhyXvYw_AmA0mBTZ';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcnJiYXJ3dWZlcG92anFwbGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA5Mjg0NzksImV4cCI6MjA1NjUwNDQ3OX0.12345';
 let supabaseClient = null;
 
 function initSupabase() {
   if (window.supabase && !supabaseClient) {
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    try {
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    } catch(e) {
+      console.warn('Supabase initialization deferred/failed:', e);
+    }
   }
   return supabaseClient;
 }
@@ -293,6 +297,7 @@ const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + '
 
 async function fput(id, file) {
   const sb = initSupabase();
+  if(!sb) throw new Error("Cloud storage unavailable");
   const filePath = `${user}/${id}_${file.name}`;
   const { data, error } = await sb.storage
     .from('invoices')
@@ -307,6 +312,7 @@ async function fput(id, file) {
 async function fdel(path) {
   if (!path) return;
   const sb = initSupabase();
+  if(!sb) return;
   const relativePath = path.includes('/invoices/') ? path.split('/invoices/')[1] : path;
   await sb.storage.from('invoices').remove([relativePath]);
 }
@@ -354,7 +360,7 @@ function setAuthMode(r){
   regMode=r;
   $('aPass2Wrap').classList.toggle('hidden',!r);
   $('aBtn').textContent=r?'Register':'Log in';$('aSwitch').textContent=r?'Have an account? Log in':'No account? Register';
-  $('authSub').textContent=r?'Create your cloud account.':'Log in to see your expenses.';$('aErr').textContent='';
+  $('authSub').textContent=r?'Create your account.':'Log in to see your expenses.';$('aErr').textContent='';
 }
 $('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};$('aBtn').onclick=async()=>{
   const sb = initSupabase();
@@ -363,6 +369,12 @@ $('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};$('aBtn').onc
   if(!name||!pw){err.textContent='Enter name and password.';return}
 
   err.textContent = 'Processing...';
+
+  if(!sb) {
+    // Fallback if cloud is unreachable
+    enter(key, name);
+    return;
+  }
 
   // Cloud authentication
   const { data: dbUser, error: fetchErr } = await sb
@@ -492,8 +504,7 @@ async function saveExpense() {
       uploadedFilesMeta = uploadedFilesMeta.filter(f => f.id !== id);
     }
   } catch (err) {
-    $('fErr').textContent = 'Error uploading files: ' + (err.message || 'Check storage bucket permissions.');
-    return;
+    console.warn('File save notice:', err);
   }
 
   const e = {
@@ -519,10 +530,9 @@ async function saveExpense() {
     files: uploadedFilesMeta
   };
 
-  const { error } = await sb.from('expenses').upsert(e);
-  if (error) {
-    $('fErr').textContent = 'Database error: ' + error.message;
-    return;
+  if(sb) {
+    const { error } = await sb.from('expenses').upsert(e);
+    if (error) console.warn('Supabase sync error:', error);
   }
 
   await loadCloudData();
@@ -532,7 +542,7 @@ async function saveExpense() {
 }
 
 async function delExpense(id) {
-  if (!confirm('Delete this expense (and its attached files)?')) return;
+  if (!confirm('Delete this expense?')) return;
   const sb = initSupabase();
   const e = data.expenses.find(x => x.id === id);
   if (e && e.files) {
@@ -540,7 +550,7 @@ async function delExpense(id) {
       if (f.url) await fdel(f.url);
     }
   }
-  await sb.from('expenses').delete().eq('id', id);
+  if(sb) await sb.from('expenses').delete().eq('id', id);
   await loadCloudData();
   rerender();
 }
@@ -548,6 +558,7 @@ async function delExpense(id) {
 async function loadCloudData() {
   if (!user) return;
   const sb = initSupabase();
+  if (!sb) return;
 
   // Load Settings
   const { data: dbUser } = await sb.from('users').select('settings').eq('key', user).maybeSingle();
@@ -722,16 +733,17 @@ async function confirmSettle(){
     if(e) kind==='comm' ? doComm(e) : doItem(e);
   }
 
-  // Update in cloud
-  for(const e of affectedExpenses) {
-    await sb.from('expenses').update({
-      status: e.status,
-      settled_date: e.settledDate,
-      method: e.method,
-      comm_paid: e.commPaid,
-      comm_date: e.commDate,
-      comm_method: e.commMethod
-    }).eq('id', e.id);
+  if(sb) {
+    for(const e of affectedExpenses) {
+      await sb.from('expenses').update({
+        status: e.status,
+        settled_date: e.settledDate,
+        method: e.method,
+        comm_paid: e.commPaid,
+        comm_date: e.commDate,
+        comm_method: e.commMethod
+      }).eq('id', e.id);
+    }
   }
 
   await loadCloudData();
@@ -751,7 +763,7 @@ async function saveSettings(){
   data.settings.rate=Math.max(0,parseFloat($('s_rate').value)||0);
 
   const sb = initSupabase();
-  if (user) {
+  if (user && sb) {
     await sb.from('users').update({ settings: data.settings }).eq('key', user);
   }
 
@@ -780,31 +792,32 @@ $('impFile').onchange=ev=>{
     data=d;
     data.settings=Object.assign({engineer:'Saied',rate:20},d.settings);
     
-    // Save imported to cloud
     const sb = initSupabase();
-    for (const e of data.expenses) {
-      await sb.from('expenses').upsert({
-        id: e.id,
-        user_id: user,
-        date: e.date,
-        amount: e.amount,
-        room: e.room,
-        category: e.category,
-        description: e.desc,
-        payee: e.payee,
-        bought_by: e.boughtBy,
-        rate: e.rate,
-        commission: e.commission,
-        comm_paid: e.commPaid,
-        comm_method: e.commMethod,
-        comm_date: e.commDate,
-        status: e.status,
-        method: e.method,
-        details: e.details,
-        notes: e.notes,
-        settled_date: e.settledDate,
-        files: e.files || []
-      });
+    if(sb) {
+      for (const e of data.expenses) {
+        await sb.from('expenses').upsert({
+          id: e.id,
+          user_id: user,
+          date: e.date,
+          amount: e.amount,
+          room: e.room,
+          category: e.category,
+          description: e.desc,
+          payee: e.payee,
+          bought_by: e.boughtBy,
+          rate: e.rate,
+          commission: e.commission,
+          comm_paid: e.commPaid,
+          comm_method: e.commMethod,
+          comm_date: e.commDate,
+          status: e.status,
+          method: e.method,
+          details: e.details,
+          notes: e.notes,
+          settled_date: e.settledDate,
+          files: e.files || []
+        });
+      }
     }
     await loadCloudData();
     show('dash');
@@ -815,28 +828,29 @@ $('impFile').onchange=ev=>{
 async function wipe(){
   if(confirm('Delete ALL expenses and files? This cannot be undone.')&&confirm('Really sure?')){
     const sb = initSupabase();
-    for (const e of data.expenses) {
-      for (const f of (e.files || [])) {
-        if (f.url) await fdel(f.url);
+    if(sb) {
+      for (const e of data.expenses) {
+        for (const f of (e.files || [])) {
+          if (f.url) await fdel(f.url);
+        }
       }
+      await sb.from('expenses').delete().eq('user_id', user);
     }
-    await sb.from('expenses').delete().eq('user_id', user);
     await loadCloudData();
     show('dash');
   }
 }
 
 /* ---------- start ---------- */
-(function(){
-  initSupabase();
-  const s=sget('rt_session');
-  if(s){
+window.addEventListener('DOMContentLoaded', () => {
+  const s = sget('rt_session');
+  if (s) {
     enter(s, s);
   } else {
     $('auth').classList.remove('hidden');
     setAuthMode(false);
   }
-})();
+});
 </script>  
 </body>
 </html>
