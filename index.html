@@ -221,6 +221,15 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
   </section>
 </div>
 
+<!-- FILE VIEWER -->
+<div id="viewer" class="overlay hidden" onclick="closeViewer()">
+  <div class="card" style="max-width:900px;text-align:center" onclick="event.stopPropagation()">
+    <div class="row"><b id="vName" style="word-break:break-all;text-align:left"></b><button class="small" onclick="closeViewer()">Close</button></div>
+    <img id="vImg" alt="" style="max-width:100%;max-height:68vh;margin-top:10px;border-radius:8px">
+    <div class="actions" style="justify-content:center"><button class="small primary" id="vSave">⬇ Save file</button></div>
+  </div>
+</div>
+
 <!-- SETTLE DIALOG -->
 <div id="dlg" class="overlay hidden">
   <div class="card">
@@ -280,6 +289,43 @@ function initSupabase() {
   return supabaseClient;
 }
 
+/* ---------- file storage (IndexedDB, with in-memory fallback) ---------- */
+let idb=null, idbTried=false; const memFiles=new Map();
+function dbOpen(){return new Promise(res=>{try{const r=indexedDB.open('rt_files',1);r.onupgradeneeded=()=>r.result.createObjectStore('f');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);r.onblocked=()=>res(null)}catch(e){res(null)}})}
+async function getDB(){if(!idbTried){idbTried=true;idb=await dbOpen()}return idb}
+async function fput(id,blob){const d=await getDB();if(!d){memFiles.set(id,blob);return}
+  return new Promise((res,rej)=>{const tx=d.transaction('f','readwrite');tx.objectStore('f').put(blob,id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)})}
+async function fget(id){const d=await getDB();if(!d)return memFiles.get(id)||null;
+  return new Promise(res=>{try{const r=d.transaction('f').objectStore('f').get(id);r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null)}catch(e){res(null)}})}
+async function fdel(id){const d=await getDB();if(!d){memFiles.delete(id);return}
+  return new Promise(res=>{try{const tx=d.transaction('f','readwrite');tx.objectStore('f').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>res()}catch(e){res()}})}
+async function saveOut(name,data){
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch(e){}
+}
+function renderFormFiles(){
+  $('fileList').innerHTML=formFiles.map((f,i)=>`<span class="chip">📎 <span class="n">${esc(f.name)}</span><span class="s">${fsize(f.size)}</span><button type="button" class="x" onclick="removeFormFile(${i})" aria-label="Remove">✕</button></span>`).join('');
+}
+function removeFormFile(i){const f=formFiles[i];if(f&&!f.blob)removedFiles.push(f.id);formFiles.splice(i,1);renderFormFiles()}
+$('f_files').onchange=ev=>{
+  [...ev.target.files].forEach(file=>formFiles.push({id:uid(),name:file.name,type:file.type||'',size:file.size,blob:file}));
+  ev.target.value='';renderFormFiles();
+};
+let viewerUrl=null;
+async function openFile(id){
+  let meta=null;data.expenses.some(e=>(e.files||[]).some(f=>f.id===id&&(meta=f)));
+  if(!meta)return;
+  const blob=await fget(id);
+  if(!blob){alert('This file is not stored on this device.');return}
+  const isImg=(meta.type||'').startsWith('image/')&&!/heic|heif|tiff/i.test(meta.type);
+  if(!isImg){await saveOut(meta.name,blob);return}
+  if(viewerUrl)URL.revokeObjectURL(viewerUrl);
+  viewerUrl=URL.createObjectURL(blob);
+  $('vName').textContent=meta.name;$('vImg').src=viewerUrl;
+  $('vSave').onclick=()=>saveOut(meta.name,blob);
+  $('viewer').classList.remove('hidden');
+}
+function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');if(viewerUrl){URL.revokeObjectURL(viewerUrl);viewerUrl=null}}
+
 let formFiles = [], removedFiles = [];
 const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 
@@ -298,67 +344,47 @@ function setAuthMode(r){
 $('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};
 
 $('aBtn').onclick = async () => {
-  const name = $('aName').value.trim(), pw = $('aPass').value, err =$('aErr');
+  const name = $('aName').value.trim(), pw = $('aPass').value, err = $('aErr');
   const key = name.toLowerCase();
   if (!name || !pw) { err.textContent = 'Enter name and password.'; return; }
-
-  err.textContent = 'Processing...';
-
+  err.textContent = 'Please wait...';
   try {
-    const sb = initSupabase();
+    const localUsers = JSON.parse(sget('rt_local_users') || '{}');
+    // Cloud lookup is optional: it must never block the login
     let dbUser = null;
-    
+    const sb = initSupabase();
     if (sb) {
       try {
-        const res = await sb.from('users').select('*').eq('key', key).maybeSingle();
-        if (!res.error) dbUser = res.data;
+        const res = await Promise.race([
+          sb.from('users').select('*').eq('key', key).maybeSingle(),
+          new Promise(r => setTimeout(() => r(null), 4000))
+        ]);
+        if (res && !res.error) dbUser = res.data;
       } catch (e) {}
     }
 
     if (regMode) {
       if (pw.length < 4) { err.textContent = 'Password must be at least 4 characters.'; return; }
       if (pw !== $('aPass2').value) { err.textContent = 'Passwords do not match.'; return; }
-
-      const localUsers = JSON.parse(sget('rt_local_users') || '{}');
-      if (dbUser || localUsers[key]) { err.textContent = 'This name already exists.'; return; }
-
+      if (dbUser || localUsers[key]) { err.textContent = 'This name already exists. Try logging in.'; return; }
       const salt = uid();
       const userHash = await hash(pw, salt);
-
-      if (sb) {
-        try {
-          await sb.from('users').insert({ key, name, salt, hash: userHash });
-        } catch (e) {}
-      }
-
       localUsers[key] = { key, name, salt, hash: userHash };
       sset('rt_local_users', JSON.stringify(localUsers));
-
+      if (sb) { try { await sb.from('users').insert({ key, name, salt, hash: userHash }); } catch (e) {} }
+      err.textContent = '';
       enter(key, name);
     } else {
-      const localUsers = JSON.parse(sget('rt_local_users') || '{}');
-      const targetUser = dbUser || localUsers[key];
-
-      if (!targetUser) {
-        // Fallback: auto-create account locally if user tries to log in without existing user table
-        const salt = uid();
-        const userHash = await hash(pw, salt);
-        localUsers[key] = { key, name, salt, hash: userHash };
-        sset('rt_local_users', JSON.stringify(localUsers));
-        enter(key, name);
-        return;
-      }
-
-      if (targetUser.hash !== await hash(pw, targetUser.salt)) {
-        err.textContent = 'Wrong password.';
-        return;
-      }
-
-      enter(key, targetUser.name);
+      const target = localUsers[key] || dbUser;
+      if (!target) { err.textContent = 'No account with this name. Tap "No account? Register" below.'; return; }
+      if (target.hash !== await hash(pw, target.salt)) { err.textContent = 'Wrong password.'; return; }
+      localUsers[key] = { key, name: target.name, salt: target.salt, hash: target.hash };
+      sset('rt_local_users', JSON.stringify(localUsers));
+      err.textContent = '';
+      enter(key, target.name);
     }
   } catch (e) {
-    // Ultimate fallback for absolute safety
-    enter(key, name);
+    err.textContent = 'Something went wrong: ' + (e && e.message ? e.message : e);
   }
 };
 
@@ -412,7 +438,7 @@ $('f_method').onchange=()=>renderMethodFields();$('f_cat').onchange=updateCatLab
 $('f_amount').oninput=updateCommNote;
 document.querySelectorAll('input[name=by]').forEach(r=>r.onchange=updateCommNote);
 function resetForm(){
-  editId=null; formFiles=[]; removedFiles=[];
+  editId=null; formFiles=[]; removedFiles=[]; renderFormFiles();
   $('formTitle').textContent='Add expense';$('f_date').value=today(); $('f_amount').value='';$('f_desc').value=''; $('f_payee').value='';$('f_notes').value='';
   $('f_room').selectedIndex=0; $('f_cat').selectedIndex=0; $('f_status').value='paid';$('f_method').value='cash';
   document.querySelector('input[name=by][value=me]').checked=true;
@@ -453,6 +479,12 @@ async function saveExpense() {
     settledDate: old ? old.settledDate : ''
   };
 
+  e.files = formFiles.map(f => ({ id: f.id, name: f.name, type: f.type, size: f.size }));
+  try {
+    for (const f of formFiles) { if (f.blob) await fput(f.id, f.blob); }
+    for (const id of removedFiles) { await fdel(id); }
+  } catch (err) { $('fErr').textContent = 'Could not store the files on this device (storage may be full).'; return; }
+
   if (old) {
     const idx = data.expenses.findIndex(x => x.id === editId);
     if (idx !== -1) data.expenses[idx] = e;
@@ -466,16 +498,31 @@ async function saveExpense() {
   show('list');
 }
 
+function editExpense(id){
+  const e=data.expenses.find(x=>x.id===id); if(!e)return;
+  show('add'); editId=id;
+  $('formTitle').textContent='Edit expense';
+  $('f_date').value=e.date; $('f_amount').value=e.amount; $('f_room').value=e.room; $('f_cat').value=e.category;
+  $('f_desc').value=e.desc; $('f_payee').value=e.payee; $('f_notes').value=e.notes;
+  $('f_status').value=e.status; $('f_method').value=e.method;
+  document.querySelector(`input[name=by][value=${e.boughtBy}]`).checked=true;
+  renderMethodFields(e.details); updateCatLabels(); updateCommNote();
+  formFiles=(e.files||[]).map(f=>({...f})); removedFiles=[]; renderFormFiles();
+}
+
 function saveLocalData() {
   sset('rt_data_' + user, JSON.stringify(data));
 }
 
 async function loadData() {
   if (!user) return;
+  data = { settings: { engineer: 'Saied', rate: 20 }, expenses: [] };
   const raw = sget('rt_data_' + user);
   if (raw) {
     try {
       data = JSON.parse(raw);
+      data.settings = Object.assign({engineer:'Saied',rate:20}, data.settings);
+      if (!Array.isArray(data.expenses)) data.expenses = [];
     } catch(e) {}
   }
 }
@@ -542,8 +589,9 @@ function itemHTML(e,opt={}){
     <div class="muted">${esc(e.date)} · ${esc(e.room)} · ${esc(e.category)} · ${methodText(e)}</div>
     <div style="margin-top:4px"><span class="badge ${st}">${STATUS_LABEL[e.status].replace('Saied',esc(eng()))}</span>
     ${e.boughtBy==='saied'?`<span class="badge b-muted">Bought by ${esc(eng())}</span>`:''}
-    ${e.commission?`<span class="badge ${e.commPaid?'b-good':'b-warn'}">Commission ${money(e.commission)}${e.commPaid?'paid':'unpaid'}</span>`:''}</div>
+    ${e.commission?`<span class="badge ${e.commPaid?'b-good':'b-warn'}">Commission ${money(e.commission)} ${e.commPaid?'paid':'unpaid'}</span>`:''}</div>
     ${e.notes?`<div class="muted" style="margin-top:4px">📝 ${esc(e.notes)}</div>`:''}
+    ${(e.files&&e.files.length)?`<div class="chips">${e.files.map(f=>`<button class="small chipbtn" onclick="openFile('${f.id}')">📎 <span>${esc(f.name)}</span></button>`).join('')}</div>`:''}
     </div><div class="amt">${money(e.amount)}</div></div><div class="actions">`;
   if(e.status!=='paid')h+=`<button class="small primary" onclick="openSettle('${e.id}','item')">✔ Mark paid</button>`;
   if(e.commission&&!e.commPaid)h+=`<button class="small" onclick="openSettle('${e.id}','comm')">💵 Pay commission</button>`;
@@ -588,7 +636,7 @@ function openSettle(id,kind){
   settleT={id,kind};
   const e=data.expenses.find(x=>x.id===id);
   $('d_date').value=today();
-  $('d_method').value=kind==='comm'\vert{}\vert{}kind==='allsaied'?'cash':(e&&e.method)\vert{}\vert{}'cash';$('dTitle').textContent=kind==='comm'?'Pay commission':kind==='allsaied'?`Pay ${eng()} everything`:'Mark as paid';
+  $('d_method').value=kind==='comm'||kind==='allsaied'?'cash':(e&&e.method)||'cash';$('dTitle').textContent=kind==='comm'?'Pay commission':kind==='allsaied'?`Pay ${eng()} everything`:'Mark as paid';
   $('dInfo').textContent=kind==='allsaied'?`Marks all items he paid for and all his unpaid commission as paid (${money(totals(data.expenses).owedSaied)}).`
     :kind==='comm'?`${money(e.commission)} commission to ${eng()}`:`${money(e.amount)} — ${e.status==='saied'?'to '+eng():'to '+(e.payee||'shop')}`;
   $('dlg').classList.remove('hidden');
@@ -596,7 +644,7 @@ function openSettle(id,kind){
 function closeDlg(){$('dlg').classList.add('hidden');settleT=null}
 
 function confirmSettle(){
-  const {id,kind}=settleT, d=$('d_date').value\vert{}\vert{}today(), m=$('d_method').value;
+  const {id,kind}=settleT, d=$('d_date').value||today(), m=$('d_method').value;
   const doItem=e=>{e.status='paid';e.settledDate=d;e.method=m};
   const doComm=e=>{e.commPaid=true;e.commDate=d;e.commMethod=m};
 
@@ -616,7 +664,8 @@ function confirmSettle(){
 }
 
 function delExpense(id){
-  if(!confirm('Delete this expense?'))return;
+  if(!confirm('Delete this expense (and its attached files)?'))return;
+  const ex=data.expenses.find(x=>x.id===id); if(ex)(ex.files||[]).forEach(f=>fdel(f.id));
   data.expenses=data.expenses.filter(x=>x.id!==id);
   saveLocalData();
   rerender();
@@ -667,6 +716,7 @@ $('impFile').onchange=ev=>{
 
 function wipe(){
   if(confirm('Delete ALL expenses? This cannot be undone.')&&confirm('Really sure?')){
+    data.expenses.forEach(e=>(e.files||[]).forEach(f=>fdel(f.id)));
     data.expenses=[];
     saveLocalData();
     show('dash');
@@ -676,8 +726,9 @@ function wipe(){
 /* ---------- start ---------- */
 window.addEventListener('DOMContentLoaded', () => {
   const s = sget('rt_session');
-  if (s) {
-    enter(s, s);
+  const lu = JSON.parse(sget('rt_local_users') || '{}');
+  if (s && lu[s]) {
+    enter(s, lu[s].name);
   } else {
     $('auth').classList.remove('hidden');
     setAuthMode(false);
