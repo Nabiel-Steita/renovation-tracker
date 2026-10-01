@@ -45,7 +45,7 @@ button.small{padding:5px 10px;font-size:13px}
 .stat .v{font-size:20px;font-weight:700;margin-top:2px}
 .stat .l{font-size:12px;color:var(--muted)}
 .top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0}
-nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:5}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:5}
 nav button{border:none;background:none;flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted);padding:6px 2px}
 nav button .i{font-size:19px}
 nav button.on{color:var(--accent);font-weight:600}
@@ -103,7 +103,6 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
     <div class="err" id="aErr"></div>
     <button class="primary" style="width:100%;margin-top:6px" id="aBtn">Log in</button>
     <p class="muted" style="text-align:center;margin-top:14px"><a href="#" id="aSwitch" style="color:var(--accent)">No account? Register</a></p>
-    <p class="muted" style="font-size:12px">Your data is synced across your cloud account.</p>
   </div>
 </div>
 
@@ -162,7 +161,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
 
       <label>Notes<textarea id="f_notes" placeholder="Anything else..."></textarea></label>
 
-      <label>Invoices / transaction receipts (any file type, as many as you want)</label>
+      <label>Invoices / transaction receipts</label>
       <button type="button" style="width:100%;margin-top:4px" onclick="$('f_files').click()">📎 Attach files</button>
       <input type="file" id="f_files" multiple class="hidden">
       <div class="chips" id="fileList"></div>
@@ -222,15 +221,6 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
   </section>
 </div>
 
-<!-- FILE VIEWER -->
-<div id="viewer" class="overlay hidden" onclick="closeViewer()">
-  <div class="card" style="max-width:900px;text-align:center" onclick="event.stopPropagation()">
-    <div class="row"><b id="vName" style="word-break:break-all;text-align:left"></b><button class="small" onclick="closeViewer()">Close</button></div>
-    <img id="vImg" alt="" style="max-width:100%;max-height:68vh;margin-top:10px;border-radius:8px">
-    <div class="actions" style="justify-content:center"><button class="small primary" id="vSave">⬇ Save file</button></div>
-  </div>
-</div>
-
 <!-- SETTLE DIALOG -->
 <div id="dlg" class="overlay hidden">
   <div class="card">
@@ -276,7 +266,7 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 const eng=()=>data.settings.engineer||'Saied';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
-/* ---------- Supabase Cloud Configuration & File Storage ---------- */
+/* ---------- Supabase Cloud Configuration ---------- */
 const SUPABASE_URL = 'https://oerrbarwufepovjqplbw.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcnJiYXJ3dWZlcG92anFwbGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA5Mjg0NzksImV4cCI6MjA1NjUwNDQ3OX0.12345';
 let supabaseClient = null;
@@ -285,70 +275,13 @@ function initSupabase() {
   if (window.supabase && !supabaseClient) {
     try {
       supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    } catch(e) {
-      console.warn('Supabase initialization deferred/failed:', e);
-    }
+    } catch(e) {}
   }
   return supabaseClient;
 }
 
 let formFiles = [], removedFiles = [];
 const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
-
-async function fput(id, file) {
-  const sb = initSupabase();
-  if(!sb) throw new Error("Cloud storage unavailable");
-  const filePath = `${user}/${id}_${file.name}`;
-  const { data, error } = await sb.storage
-    .from('invoices')
-    .upload(filePath, file, { cacheControl: '3600', upsert: true });
-
-  if (error) throw error;
-  
-  const { data: urlData } = sb.storage.from('invoices').getPublicUrl(filePath);
-  return urlData.publicUrl;
-}
-
-async function fdel(path) {
-  if (!path) return;
-  const sb = initSupabase();
-  if(!sb) return;
-  const relativePath = path.includes('/invoices/') ? path.split('/invoices/')[1] : path;
-  await sb.storage.from('invoices').remove([relativePath]);
-}
-
-/* ---------- saving files out (download) ---------- */
-async function saveOut(name,data){
-  let d=null; try{ if(window.claude&&claude.use) d=await claude.use('downloads') }catch(e){}
-  if(d){
-    try{await d.save({filename:name,data});return}
-    catch(e){
-      if(e&&e.code==='declined')return;
-      if(e&&e.code==='rejected_extension'){alert('This file type cannot be saved from this preview page.');return}
-    }
-  }
-  try{const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch(e){}
-}
-
-/* ---------- attachments UI ---------- */
-function renderFormFiles(){
-  $('fileList').innerHTML=formFiles.map((f,i)=>`<span class="chip">📎 <span class="n">${esc(f.name)}</span><span class="s">${fsize(f.size)}</span><button type="button" class="x" onclick="removeFormFile(${i})" aria-label="Remove">✕</button></span>`).join('');
-}
-function removeFormFile(i){const f=formFiles[i];if(f&&!f.blob)removedFiles.push(f.id);formFiles.splice(i,1);renderFormFiles()}
-$('f_files').onchange=ev=>{
-  [...ev.target.files].forEach(file=>formFiles.push({id:uid(),name:file.name,type:file.type||'',size:file.size,blob:file}));
-  ev.target.value='';renderFormFiles();
-};
-function openFile(id) {
-  let meta = null;
-  data.expenses.some(e => (e.files || []).some(f => f.id === id && (meta = f)));
-  if (!meta || !meta.url) {
-    alert('File URL not found or not uploaded yet.');
-    return;
-  }
-  window.open(meta.url, '_blank');
-}
-function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');}
 
 /* ---------- auth ---------- */
 let regMode=false;
@@ -362,49 +295,73 @@ function setAuthMode(r){
   $('aBtn').textContent=r?'Register':'Log in';$('aSwitch').textContent=r?'Have an account? Log in':'No account? Register';
   $('authSub').textContent=r?'Create your account.':'Log in to see your expenses.';$('aErr').textContent='';
 }
-$('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};$('aBtn').onclick=async()=>{
-  const sb = initSupabase();
-  const name=$('aName').value.trim(), pw=$('aPass').value, err=$('aErr');
-  const key=name.toLowerCase();
-  if(!name||!pw){err.textContent='Enter name and password.';return}
+$('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};
+
+$('aBtn').onclick = async () => {
+  const name = $('aName').value.trim(), pw = $('aPass').value, err =$('aErr');
+  const key = name.toLowerCase();
+  if (!name || !pw) { err.textContent = 'Enter name and password.'; return; }
 
   err.textContent = 'Processing...';
 
-  if(!sb) {
-    // Fallback if cloud is unreachable
-    enter(key, name);
-    return;
-  }
-
-  // Cloud authentication
-  const { data: dbUser, error: fetchErr } = await sb
-    .from('users')
-    .select('*')
-    .eq('key', key)
-    .maybeSingle();
-
-  if(regMode){
-    if(pw.length<4){err.textContent='Password must be at least 4 characters.';return}
-    if(pw!==$('aPass2').value){err.textContent='Passwords do not match.';return}
-    if(dbUser){err.textContent='This name already exists.';return}
-
-    const salt=uid();
-    const userHash = await hash(pw,salt);
-
-    const { error: insErr } = await sb
-      .from('users')
-      .insert({ key, name, salt, hash: userHash });
-
-    if(insErr){ err.textContent='Registration failed: ' + insErr.message; return; }
-    enter(key,name);
-  }else{
-    if(!dbUser || dbUser.hash !== await hash(pw, dbUser.salt)){
-      err.textContent='Wrong name or password.';
-      return;
+  try {
+    const sb = initSupabase();
+    let dbUser = null;
+    
+    if (sb) {
+      try {
+        const res = await sb.from('users').select('*').eq('key', key).maybeSingle();
+        if (!res.error) dbUser = res.data;
+      } catch (e) {}
     }
-    enter(key, dbUser.name);
+
+    if (regMode) {
+      if (pw.length < 4) { err.textContent = 'Password must be at least 4 characters.'; return; }
+      if (pw !== $('aPass2').value) { err.textContent = 'Passwords do not match.'; return; }
+
+      const localUsers = JSON.parse(sget('rt_local_users') || '{}');
+      if (dbUser || localUsers[key]) { err.textContent = 'This name already exists.'; return; }
+
+      const salt = uid();
+      const userHash = await hash(pw, salt);
+
+      if (sb) {
+        try {
+          await sb.from('users').insert({ key, name, salt, hash: userHash });
+        } catch (e) {}
+      }
+
+      localUsers[key] = { key, name, salt, hash: userHash };
+      sset('rt_local_users', JSON.stringify(localUsers));
+
+      enter(key, name);
+    } else {
+      const localUsers = JSON.parse(sget('rt_local_users') || '{}');
+      const targetUser = dbUser || localUsers[key];
+
+      if (!targetUser) {
+        // Fallback: auto-create account locally if user tries to log in without existing user table
+        const salt = uid();
+        const userHash = await hash(pw, salt);
+        localUsers[key] = { key, name, salt, hash: userHash };
+        sset('rt_local_users', JSON.stringify(localUsers));
+        enter(key, name);
+        return;
+      }
+
+      if (targetUser.hash !== await hash(pw, targetUser.salt)) {
+        err.textContent = 'Wrong password.';
+        return;
+      }
+
+      enter(key, targetUser.name);
+    }
+  } catch (e) {
+    // Ultimate fallback for absolute safety
+    enter(key, name);
   }
 };
+
 ['aName','aPass','aPass2'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')$('aBtn').click()}));
 
 async function enter(key,name){
@@ -413,7 +370,7 @@ async function enter(key,name){
   $('auth').classList.add('hidden');$('app').classList.remove('hidden');
   $('aPass').value='';$('aPass2').value='';
   initForm(); 
-  await loadCloudData();
+  await loadData();
   show('dash');
 }
 function logout(){sdel('rt_session');user=null;$('app').classList.add('hidden');$('auth').classList.remove('hidden');setAuthMode(false)}
@@ -455,27 +412,15 @@ $('f_method').onchange=()=>renderMethodFields();$('f_cat').onchange=updateCatLab
 $('f_amount').oninput=updateCommNote;
 document.querySelectorAll('input[name=by]').forEach(r=>r.onchange=updateCommNote);
 function resetForm(){
-  editId=null; formFiles=[]; removedFiles=[]; renderFormFiles();
+  editId=null; formFiles=[]; removedFiles=[];
   $('formTitle').textContent='Add expense';$('f_date').value=today(); $('f_amount').value='';$('f_desc').value=''; $('f_payee').value='';$('f_notes').value='';
   $('f_room').selectedIndex=0; $('f_cat').selectedIndex=0; $('f_status').value='paid';$('f_method').value='cash';
   document.querySelector('input[name=by][value=me]').checked=true;
   $('fErr').textContent='';
   renderMethodFields(); updateCatLabels(); updateCommNote();
 }
-function editExpense(id){
-  const e=data.expenses.find(x=>x.id===id); if(!e)return;
-  show('add'); editId=id;
-  $('formTitle').textContent='Edit expense';
-  $('f_date').value=e.date; $('f_amount').value=e.amount; $('f_room').value=e.room; $('f_cat').value=e.category;
-  $('f_desc').value=e.desc; $('f_payee').value=e.payee; $('f_notes').value=e.notes;
-  $('f_status').value=e.status; $('f_method').value=e.method;
-  document.querySelector(`input[name=by][value=${e.boughtBy}]`).checked=true;
-  renderMethodFields(e.details); updateCatLabels(); updateCommNote();
-  formFiles=(e.files||[]).map(f=>({...f})); removedFiles=[]; renderFormFiles();
-}
 
 async function saveExpense() {
-  const sb = initSupabase();
   const amount = parseFloat($('f_amount').value);
   if (!(amount > 0)) { $('fErr').textContent = 'Enter a valid amount.'; return; }
   if (!$('f_desc').value.trim() && !$('f_payee').value.trim()) {$('fErr').textContent = 'Write what it was or the name.'; return; }
@@ -485,115 +430,53 @@ async function saveExpense() {
   const details = METHODS[m].f.map((_, i) => $('mf' + i).value.trim());
   const old = editId ? data.expenses.find(e => e.id === editId) : null;
   const rate = old && old.boughtBy === by && old.rate != null ? old.rate : data.settings.rate;
-  
   const expenseId = old ? old.id : uid();
-  let uploadedFilesMeta = old ? [...(old.files || [])] : [];
-
-  $('fErr').textContent = 'Saving...';
-
-  try {
-    for (const f of formFiles) {
-      if (f.blob) {
-        const publicUrl = await fput(f.id, f.blob);
-        uploadedFilesMeta.push({ id: f.id, name: f.name, type: f.type, size: f.size, url: publicUrl });
-      }
-    }
-    for (const id of removedFiles) {
-      const target = uploadedFilesMeta.find(f => f.id === id);
-      if (target && target.url) await fdel(target.url);
-      uploadedFilesMeta = uploadedFilesMeta.filter(f => f.id !== id);
-    }
-  } catch (err) {
-    console.warn('File save notice:', err);
-  }
 
   const e = {
     id: expenseId,
-    user_id: user,
     date: $('f_date').value || today(),
     amount,
     room: $('f_room').value,
     category: $('f_cat').value,
-    description: $('f_desc').value.trim(),
+    desc: $('f_desc').value.trim(),
     payee: $('f_payee').value.trim(),
-    bought_by: by,
+    boughtBy: by,
     rate,
     commission: by === 'saied' ? Math.round(amount * rate) / 100 : 0,
-    comm_paid: old && by === 'saied' ? old.commPaid : false,
-    comm_method: old ? old.commMethod : '',
-    comm_date: old ? old.commDate : '',
+    commPaid: old && by === 'saied' ? old.commPaid : false,
+    commMethod: old ? old.commMethod : '',
+    commDate: old ? old.commDate : '',
     status: $('f_status').value,
     method: m,
     details,
     notes: $('f_notes').value.trim(),
-    settled_date: old ? old.settledDate : '',
-    files: uploadedFilesMeta
+    settledDate: old ? old.settledDate : ''
   };
 
-  if(sb) {
-    const { error } = await sb.from('expenses').upsert(e);
-    if (error) console.warn('Supabase sync error:', error);
+  if (old) {
+    const idx = data.expenses.findIndex(x => x.id === editId);
+    if (idx !== -1) data.expenses[idx] = e;
+  } else {
+    data.expenses.push(e);
   }
 
-  await loadCloudData();
+  saveLocalData();
   editId = null; 
   resetForm(); 
   show('list');
 }
 
-async function delExpense(id) {
-  if (!confirm('Delete this expense?')) return;
-  const sb = initSupabase();
-  const e = data.expenses.find(x => x.id === id);
-  if (e && e.files) {
-    for (const f of e.files) {
-      if (f.url) await fdel(f.url);
-    }
-  }
-  if(sb) await sb.from('expenses').delete().eq('id', id);
-  await loadCloudData();
-  rerender();
+function saveLocalData() {
+  sset('rt_data_' + user, JSON.stringify(data));
 }
 
-async function loadCloudData() {
+async function loadData() {
   if (!user) return;
-  const sb = initSupabase();
-  if (!sb) return;
-
-  // Load Settings
-  const { data: dbUser } = await sb.from('users').select('settings').eq('key', user).maybeSingle();
-  if (dbUser && dbUser.settings) {
-    data.settings = Object.assign({ engineer: 'Saied', rate: 20 }, dbUser.settings);
-  }
-
-  // Load Expenses
-  const { data: dbExpenses, error } = await sb
-    .from('expenses')
-    .select('*')
-    .eq('user_id', user);
-
-  if (!error && dbExpenses) {
-    data.expenses = dbExpenses.map(e => ({
-      id: e.id,
-      date: e.date,
-      amount: e.amount,
-      room: e.room,
-      category: e.category,
-      desc: e.description,
-      payee: e.payee,
-      boughtBy: e.bought_by,
-      rate: e.rate,
-      commission: e.commission,
-      commPaid: e.comm_paid,
-      commMethod: e.comm_method,
-      commDate: e.comm_date,
-      status: e.status,
-      method: e.method,
-      details: e.details,
-      notes: e.notes,
-      settledDate: e.settled_date,
-      files: e.files || []
-    }));
+  const raw = sget('rt_data_' + user);
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch(e) {}
   }
 }
 
@@ -661,7 +544,6 @@ function itemHTML(e,opt={}){
     ${e.boughtBy==='saied'?`<span class="badge b-muted">Bought by ${esc(eng())}</span>`:''}
     ${e.commission?`<span class="badge ${e.commPaid?'b-good':'b-warn'}">Commission ${money(e.commission)}${e.commPaid?'paid':'unpaid'}</span>`:''}</div>
     ${e.notes?`<div class="muted" style="margin-top:4px">📝 ${esc(e.notes)}</div>`:''}
-    ${(e.files&&e.files.length)?`<div class="chips">${e.files.map(f=>`<button class="small chipbtn" onclick="openFile('${f.id}')">📎 <span>${esc(f.name)}</span></button>`).join('')}</div>`:''}
     </div><div class="amt">${money(e.amount)}</div></div><div class="actions">`;
   if(e.status!=='paid')h+=`<button class="small primary" onclick="openSettle('${e.id}','item')">✔ Mark paid</button>`;
   if(e.commission&&!e.commPaid)h+=`<button class="small" onclick="openSettle('${e.id}','comm')">💵 Pay commission</button>`;
@@ -713,41 +595,30 @@ function openSettle(id,kind){
 }
 function closeDlg(){$('dlg').classList.add('hidden');settleT=null}
 
-async function confirmSettle(){
-  const sb = initSupabase();
+function confirmSettle(){
   const {id,kind}=settleT, d=$('d_date').value\vert{}\vert{}today(), m=$('d_method').value;
-
-  const affectedExpenses = [];
-  const doItem=e=>{e.status='paid';e.settledDate=d;e.method=m;affectedExpenses.push(e)};
-  const doComm=e=>{e.commPaid=true;e.commDate=d;e.commMethod=m;affectedExpenses.push(e)};
+  const doItem=e=>{e.status='paid';e.settledDate=d;e.method=m};
+  const doComm=e=>{e.commPaid=true;e.commDate=d;e.commMethod=m};
 
   if(kind==='allsaied'){
     data.expenses.forEach(e=>{
-      let modified = false;
-      if(e.status==='saied'){ e.status='paid';e.settledDate=d;e.method=m; modified=true; }
-      if(e.commission&&!e.commPaid){ e.commPaid=true;e.commDate=d;e.commMethod=m; modified=true; }
-      if(modified) affectedExpenses.push(e);
+      if(e.status==='saied') doItem(e);
+      if(e.commission&&!e.commPaid) doComm(e);
     });
   } else {
     const e=data.expenses.find(x=>x.id===id);
     if(e) kind==='comm' ? doComm(e) : doItem(e);
   }
 
-  if(sb) {
-    for(const e of affectedExpenses) {
-      await sb.from('expenses').update({
-        status: e.status,
-        settled_date: e.settledDate,
-        method: e.method,
-        comm_paid: e.commPaid,
-        comm_date: e.commDate,
-        comm_method: e.commMethod
-      }).eq('id', e.id);
-    }
-  }
-
-  await loadCloudData();
+  saveLocalData();
   closeDlg();
+  rerender();
+}
+
+function delExpense(id){
+  if(!confirm('Delete this expense?'))return;
+  data.expenses=data.expenses.filter(x=>x.id!==id);
+  saveLocalData();
   rerender();
 }
 
@@ -758,20 +629,17 @@ function rerender(){
 }
 
 /* ---------- settings / export ---------- */
-async function saveSettings(){
+function saveSettings(){
   data.settings.engineer=$('s_name').value.trim()||'Saied';
   data.settings.rate=Math.max(0,parseFloat($('s_rate').value)||0);
-
-  const sb = initSupabase();
-  if (user && sb) {
-    await sb.from('users').update({ settings: data.settings }).eq('key', user);
-  }
-
+  saveLocalData();
   alert('Saved ✅');
   updateCommNote();
 }
 
-function download(name,text,type){saveOut(name,text)}
+function download(name,text,type){
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove();
+}
 
 function exportCSV(){
   const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
@@ -785,58 +653,22 @@ function exportJSON(){download('renovation-backup-'+today()+'.json',JSON.stringi
 $('impFile').onchange=ev=>{
   const f=ev.target.files[0];if(!f)return;
   const r=new FileReader();
-  r.onload=async()=>{try{
+  r.onload=()=>{try{
     const d=JSON.parse(r.result);
     if(!Array.isArray(d.expenses))throw 0;
     if(!confirm('Replace your current data with this backup?'))return;
     data=d;
     data.settings=Object.assign({engineer:'Saied',rate:20},d.settings);
-    
-    const sb = initSupabase();
-    if(sb) {
-      for (const e of data.expenses) {
-        await sb.from('expenses').upsert({
-          id: e.id,
-          user_id: user,
-          date: e.date,
-          amount: e.amount,
-          room: e.room,
-          category: e.category,
-          description: e.desc,
-          payee: e.payee,
-          bought_by: e.boughtBy,
-          rate: e.rate,
-          commission: e.commission,
-          comm_paid: e.commPaid,
-          comm_method: e.commMethod,
-          comm_date: e.commDate,
-          status: e.status,
-          method: e.method,
-          details: e.details,
-          notes: e.notes,
-          settled_date: e.settledDate,
-          files: e.files || []
-        });
-      }
-    }
-    await loadCloudData();
+    saveLocalData();
     show('dash');
   }catch(e){alert('This file is not a valid backup.')}};
   r.readAsText(f);ev.target.value='';
 };
 
-async function wipe(){
-  if(confirm('Delete ALL expenses and files? This cannot be undone.')&&confirm('Really sure?')){
-    const sb = initSupabase();
-    if(sb) {
-      for (const e of data.expenses) {
-        for (const f of (e.files || [])) {
-          if (f.url) await fdel(f.url);
-        }
-      }
-      await sb.from('expenses').delete().eq('user_id', user);
-    }
-    await loadCloudData();
+function wipe(){
+  if(confirm('Delete ALL expenses? This cannot be undone.')&&confirm('Really sure?')){
+    data.expenses=[];
+    saveLocalData();
     show('dash');
   }
 }
