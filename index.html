@@ -88,6 +88,7 @@ h3{font-size:15px;margin-bottom:6px}
 button.chipbtn{border-radius:99px;padding:5px 11px;font-size:13px;max-width:100%}
 button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>  
 </head>
 <body>
 
@@ -278,17 +279,31 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 function save(){sset('rt_data_'+user,JSON.stringify(data))}
 
 /* ---------- file storage (IndexedDB, with in-memory fallback) ---------- */
-let idb=null, idbTried=false; const memFiles=new Map();
-let formFiles=[], removedFiles=[];
-function dbOpen(){return new Promise(res=>{try{const r=indexedDB.open('rt_files',1);r.onupgradeneeded=()=>r.result.createObjectStore('f');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);r.onblocked=()=>res(null)}catch(e){res(null)}})}
-async function getDB(){if(!idbTried){idbTried=true;idb=await dbOpen()}return idb}
-async function fput(id,blob){const d=await getDB();if(!d){memFiles.set(id,blob);return}
-  return new Promise((res,rej)=>{const tx=d.transaction('f','readwrite');tx.objectStore('f').put(blob,id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)})}
-async function fget(id){const d=await getDB();if(!d)return memFiles.get(id)||null;
-  return new Promise(res=>{try{const r=d.transaction('f').objectStore('f').get(id);r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null)}catch(e){res(null)}})}
-async function fdel(id){const d=await getDB();if(!d){memFiles.delete(id);return}
-  return new Promise(res=>{try{const tx=d.transaction('f','readwrite');tx.objectStore('f').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>res()}catch(e){res()}})}
-const fsize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+/* ---------- Supabase Cloud Configuration & File Storage ---------- */
+const SUPABASE_URL = 'sb_publishable_tmISJTKk8LhlNS6WhyXvYw_AmA0mBTZ';
+const SUPABASE_KEY = 'sb_secret_cTCLhi0EUAqvIt1382EtWA_dXPz39-p';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let formFiles = [], removedFiles = [];
+const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+
+async function fput(id, file) {
+  const filePath = `${user}/${id}_${file.name}`;
+  const { data, error } = await supabaseClient.storage
+    .from('invoices')
+    .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+  if (error) throw error;
+  
+  const { data: urlData } = supabaseClient.storage.from('invoices').getPublicUrl(filePath);
+  return urlData.publicUrl;
+}
+
+async function fdel(path) {
+  if (!path) return;
+  const relativePath = path.includes('/invoices/') ? path.split('/invoices/')[1] : path;
+  await supabaseClient.storage.from('invoices').remove([relativePath]);
+}
 
 /* ---------- saving files out (download) ---------- */
 async function saveOut(name,data){
@@ -312,19 +327,14 @@ $('f_files').onchange=ev=>{
   [...ev.target.files].forEach(file=>formFiles.push({id:uid(),name:file.name,type:file.type||'',size:file.size,blob:file}));
   ev.target.value='';renderFormFiles();
 };
-let viewerUrl=null;
-async function openFile(id){
-  let meta=null;data.expenses.some(e=>(e.files||[]).some(f=>f.id===id&&(meta=f)));
-  if(!meta)return;
-  const blob=await fget(id);
-  if(!blob){alert('This file is not stored on this device (it may have been added from another device or cleared with the browser data).');return}
-  const isImg=(meta.type||'').startsWith('image/')&&!/heic|heif|tiff/i.test(meta.type);
-  if(!isImg){await saveOut(meta.name,blob);return}
-  if(viewerUrl)URL.revokeObjectURL(viewerUrl);
-  viewerUrl=URL.createObjectURL(blob);
-  $('vName').textContent=meta.name;$('vImg').src=viewerUrl;
-  $('vSave').onclick=()=>saveOut(meta.name,blob);
-  $('viewer').classList.remove('hidden');
+function openFile(id) {
+  let meta = null;
+  data.expenses.some(e => (e.files || []).some(f => f.id === id && (meta = f)));
+  if (!meta || !meta.url) {
+    alert('File URL not found or not uploaded yet.');
+    return;
+  }
+  window.open(meta.url, '_blank');
 }
 function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');if(viewerUrl){URL.revokeObjectURL(viewerUrl);viewerUrl=null}}
 
@@ -363,14 +373,16 @@ $('aBtn').onclick=async()=>{
   }
 };
 ['aName','aPass','aPass2'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')$('aBtn').click()}));
-function enter(key,name){
+async function enter(key,name){
   user=key; sset('rt_session',key);
   data=jget('rt_data_'+key,null)||{settings:{engineer:'Saied',rate:20},expenses:[]};
   data.settings=Object.assign({engineer:'Saied',rate:20},data.settings);
   $('who').textContent=name;
   $('auth').classList.add('hidden'); $('app').classList.remove('hidden');
   $('aPass').value='';$('aPass2').value='';
-  initForm(); show('dash');
+  initForm(); 
+  await loadCloudData(); // Pull latest expenses from Supabase
+  show('dash');
 }
 function logout(){sdel('rt_session');user=null;$('app').classList.add('hidden');$('auth').classList.remove('hidden');setAuthMode(false)}
 
@@ -423,30 +435,6 @@ function resetForm(){
   $('fErr').textContent='';
   renderMethodFields(); updateCatLabels(); updateCommNote();
 }
-async function saveExpense(){
-  const amount=parseFloat($('f_amount').value);
-  if(!(amount>0)){$('fErr').textContent='Enter a valid amount.';return}
-  if(!$('f_desc').value.trim()&&!$('f_payee').value.trim()){$('fErr').textContent='Write what it was or the name.';return}
-  const by=document.querySelector('input[name=by]:checked').value;
-  const m=$('f_method').value;
-  const details=METHODS[m].f.map((_,i)=>$('mf'+i).value.trim());
-  const old=editId?data.expenses.find(e=>e.id===editId):null;
-  const rate=old&&old.boughtBy===by&&old.rate!=null?old.rate:data.settings.rate;
-  const e={
-    id:old?old.id:uid(), date:$('f_date').value||today(), amount, room:$('f_room').value, category:$('f_cat').value,
-    desc:$('f_desc').value.trim(), payee:$('f_payee').value.trim(), boughtBy:by, rate,
-    commission:by==='saied'?Math.round(amount*rate)/100:0,
-    commPaid:old&&by==='saied'?old.commPaid:false, commMethod:old?old.commMethod:'', commDate:old?old.commDate:'',
-    status:$('f_status').value, method:m, details, notes:$('f_notes').value.trim(), settledDate:old?old.settledDate:''
-  };
-  e.files=formFiles.map(f=>({id:f.id,name:f.name,type:f.type,size:f.size}));
-  try{
-    for(const f of formFiles){ if(f.blob) await fput(f.id,f.blob) }
-    for(const id of removedFiles){ await fdel(id) }
-  }catch(err){ $('fErr').textContent='Could not store the files on this device (storage may be full). Try fewer or smaller files.'; return }
-  if(old)data.expenses[data.expenses.indexOf(old)]=e; else data.expenses.push(e);
-  save(); editId=null; resetForm(); show('list');
-}
 function editExpense(id){
   const e=data.expenses.find(x=>x.id===id); if(!e)return;
   show('add'); editId=id;
@@ -458,10 +446,115 @@ function editExpense(id){
   renderMethodFields(e.details); updateCatLabels(); updateCommNote();
   formFiles=(e.files||[]).map(f=>({...f})); removedFiles=[]; renderFormFiles();
 }
-function delExpense(id){
-  if(!confirm('Delete this expense (and its attached files)?'))return;
-  const e=data.expenses.find(x=>x.id===id); if(e)(e.files||[]).forEach(f=>fdel(f.id));
-  data.expenses=data.expenses.filter(x=>x.id!==id);save();rerender();
+async function saveExpense() {
+  const amount = parseFloat($('f_amount').value);
+  if (!(amount > 0)) { $('fErr').textContent = 'Enter a valid amount.'; return; }
+  if (!$('f_desc').value.trim() && !$('f_payee').value.trim()) { $('fErr').textContent = 'Write what it was or the name.'; return; }
+
+  const by = document.querySelector('input[name=by]:checked').value;
+  const m = $('f_method').value;
+  const details = METHODS[m].f.map((_, i) => $('mf' + i).value.trim());
+  const old = editId ? data.expenses.find(e => e.id === editId) : null;
+  const rate = old && old.boughtBy === by && old.rate != null ? old.rate : data.settings.rate;
+  
+  const expenseId = old ? old.id : uid();
+  let uploadedFilesMeta = old ? [...(old.files || [])] : [];
+
+  try {
+    for (const f of formFiles) {
+      if (f.blob) {
+        const publicUrl = await fput(f.id, f.blob);
+        uploadedFilesMeta.push({ id: f.id, name: f.name, type: f.type, size: f.size, url: publicUrl });
+      }
+    }
+    for (const id of removedFiles) {
+      const target = uploadedFilesMeta.find(f => f.id === id);
+      if (target && target.url) await fdel(target.url);
+      uploadedFilesMeta = uploadedFilesMeta.filter(f => f.id !== id);
+    }
+  } catch (err) {
+    $('fErr').textContent = 'Error uploading files to cloud storage.';
+    return;
+  }
+
+  const e = {
+    id: expenseId,
+    user_id: user,
+    date: $('f_date').value || today(),
+    amount,
+    room: $('f_room').value,
+    category: $('f_cat').value,
+    description: $('f_desc').value.trim(),
+    payee: $('f_payee').value.trim(),
+    bought_by: by,
+    rate,
+    commission: by === 'saied' ? Math.round(amount * rate) / 100 : 0,
+    comm_paid: old && by === 'saied' ? old.commPaid : false,
+    comm_method: old ? old.commMethod : '',
+    comm_date: old ? old.commDate : '',
+    status: $('f_status').value,
+    method: m,
+    details,
+    notes: $('f_notes').value.trim(),
+    settled_date: old ? old.settledDate : '',
+    files: uploadedFilesMeta
+  };
+
+  const { error } = await supabaseClient.from('expenses').upsert(e);
+  if (error) {
+    $('fErr').textContent = 'Database error: ' + error.message;
+    return;
+  }
+
+  await loadCloudData();
+  editId = null; 
+  resetForm(); 
+  show('list');
+}
+
+async function delExpense(id) {
+  if (!confirm('Delete this expense (and its attached files)?')) return;
+  const e = data.expenses.find(x => x.id === id);
+  if (e && e.files) {
+    for (const f of e.files) {
+      if (f.url) await fdel(f.url);
+    }
+  }
+  await supabaseClient.from('expenses').delete().eq('id', id);
+  await loadCloudData();
+  rerender();
+}
+
+async function loadCloudData() {
+  if (!user) return;
+  const { data: dbExpenses, error } = await supabaseClient
+    .from('expenses')
+    .select('*')
+    .eq('user_id', user);
+
+  if (!error && dbExpenses) {
+    data.expenses = dbExpenses.map(e => ({
+      id: e.id,
+      date: e.date,
+      amount: e.amount,
+      room: e.room,
+      category: e.category,
+      desc: e.description,
+      payee: e.payee,
+      boughtBy: e.bought_by,
+      rate: e.rate,
+      commission: e.commission,
+      commPaid: e.comm_paid,
+      commMethod: e.comm_method,
+      commDate: e.comm_date,
+      status: e.status,
+      method: e.method,
+      details: e.details,
+      notes: e.notes,
+      settledDate: e.settled_date,
+      files: e.files || []
+    }));
+  }
 }
 
 /* ---------- calculations ---------- */
@@ -627,6 +720,6 @@ function wipe(){if(confirm('Delete ALL expenses and files? This cannot be undone
   if(s&&users[s])enter(s,users[s].name);
   else{ $('auth').classList.remove('hidden'); setAuthMode(Object.keys(users).length===0) }
 })();
-</script>
+</script>  
 </body>
 </html>
