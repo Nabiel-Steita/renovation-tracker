@@ -103,7 +103,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
     <div class="err" id="aErr"></div>
     <button class="primary" style="width:100%;margin-top:6px" id="aBtn">Log in</button>
     <p class="muted" style="text-align:center;margin-top:14px"><a href="#" id="aSwitch" style="color:var(--accent)">No account? Register</a></p>
-    <p class="muted" style="font-size:12px">Your data is saved only in this browser on this device.</p>
+    <p class="muted" style="font-size:12px">Your data is synced across your cloud account.</p>
   </div>
 </div>
 
@@ -207,7 +207,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
     </div>
     <div class="card">
       <h2>Backup</h2>
-      <p class="muted">Data lives only in this browser. Download a backup now and then. The backup contains your expenses but not the attached files, so keep the original invoices too.</p>
+      <p class="muted">Download a local backup of your expenses.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="exportJSON()">⬇ Download backup</button>
         <button onclick="document.getElementById('impFile').click()">⬆ Restore backup</button>
@@ -261,12 +261,11 @@ const METHODS={
 };
 const STATUS_LABEL={paid:'Paid',saied:'Owed to Saied',unpaid:'Not paid'};
 
-/* ---------- storage (safe) ---------- */
+/* ---------- storage ---------- */
 const mem={};
 function sget(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}}
 function sset(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}
 function sdel(k){try{localStorage.removeItem(k)}catch(e){delete mem[k]}}
-function jget(k,d){try{const v=sget(k);return v?JSON.parse(v):d}catch(e){return d}}
 
 /* ---------- state ---------- */
 let user=null, data={settings:{engineer:'Saied',rate:20},expenses:[]}, editId=null, settleT=null;
@@ -276,9 +275,7 @@ const money=n=>(Math.round((n||0)*100)/100).toLocaleString('en-US',{minimumFract
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const eng=()=>data.settings.engineer||'Saied';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-function save(){sset('rt_data_'+user,JSON.stringify(data))}
 
-/* ---------- file storage (IndexedDB, with in-memory fallback) ---------- */
 /* ---------- Supabase Cloud Configuration & File Storage ---------- */
 const SUPABASE_URL = 'https://oerrbarwufepovjqplbw.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tmISJTKk8LhlNS6WhyXvYw_AmA0mBTZ';
@@ -288,29 +285,30 @@ function initSupabase() {
   if (window.supabase && !supabaseClient) {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   }
+  return supabaseClient;
 }
 
 let formFiles = [], removedFiles = [];
 const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 
 async function fput(id, file) {
-  initSupabase();
+  const sb = initSupabase();
   const filePath = `${user}/${id}_${file.name}`;
-  const { data, error } = await supabaseClient.storage
+  const { data, error } = await sb.storage
     .from('invoices')
     .upload(filePath, file, { cacheControl: '3600', upsert: true });
 
   if (error) throw error;
   
-  const { data: urlData } = supabaseClient.storage.from('invoices').getPublicUrl(filePath);
+  const { data: urlData } = sb.storage.from('invoices').getPublicUrl(filePath);
   return urlData.publicUrl;
 }
 
 async function fdel(path) {
   if (!path) return;
-  initSupabase();
+  const sb = initSupabase();
   const relativePath = path.includes('/invoices/') ? path.split('/invoices/')[1] : path;
-  await supabaseClient.storage.from('invoices').remove([relativePath]);
+  await sb.storage.from('invoices').remove([relativePath]);
 }
 
 /* ---------- saving files out (download) ---------- */
@@ -320,7 +318,7 @@ async function saveOut(name,data){
     try{await d.save({filename:name,data});return}
     catch(e){
       if(e&&e.code==='declined')return;
-      if(e&&e.code==='rejected_extension'){alert('This file type cannot be saved from this preview page. It will work once the tracker is on your own domain.');return}
+      if(e&&e.code==='rejected_extension'){alert('This file type cannot be saved from this preview page.');return}
     }
   }
   try{const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch(e){}
@@ -344,7 +342,7 @@ function openFile(id) {
   }
   window.open(meta.url, '_blank');
 }
-function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');if(viewerUrl){URL.revokeObjectURL(viewerUrl);viewerUrl=null}}
+function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');}
 
 /* ---------- auth ---------- */
 let regMode=false;
@@ -355,41 +353,55 @@ async function hash(pw,salt){
 function setAuthMode(r){
   regMode=r;
   $('aPass2Wrap').classList.toggle('hidden',!r);
-  $('aBtn').textContent=r?'Register':'Log in';
-  $('aSwitch').textContent=r?'Have an account? Log in':'No account? Register';
-  $('authSub').textContent=r?'Create your account (saved on this device).':'Log in to see your expenses.';
-  $('aErr').textContent='';
+  $('aBtn').textContent=r?'Register':'Log in';$('aSwitch').textContent=r?'Have an account? Log in':'No account? Register';
+  $('authSub').textContent=r?'Create your cloud account.':'Log in to see your expenses.';$('aErr').textContent='';
 }
-$('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};
-$('aBtn').onclick=async()=>{
+$('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};$('aBtn').onclick=async()=>{
+  const sb = initSupabase();
   const name=$('aName').value.trim(), pw=$('aPass').value, err=$('aErr');
-  const users=jget('rt_users',{});
   const key=name.toLowerCase();
   if(!name||!pw){err.textContent='Enter name and password.';return}
+
+  err.textContent = 'Processing...';
+
+  // Cloud authentication
+  const { data: dbUser, error: fetchErr } = await sb
+    .from('users')
+    .select('*')
+    .eq('key', key)
+    .maybeSingle();
+
   if(regMode){
     if(pw.length<4){err.textContent='Password must be at least 4 characters.';return}
     if(pw!==$('aPass2').value){err.textContent='Passwords do not match.';return}
-    if(users[key]){err.textContent='This name already exists.';return}
+    if(dbUser){err.textContent='This name already exists.';return}
+
     const salt=uid();
-    users[key]={name,salt,hash:await hash(pw,salt)};
-    sset('rt_users',JSON.stringify(users));
+    const userHash = await hash(pw,salt);
+
+    const { error: insErr } = await sb
+      .from('users')
+      .insert({ key, name, salt, hash: userHash });
+
+    if(insErr){ err.textContent='Registration failed: ' + insErr.message; return; }
     enter(key,name);
   }else{
-    const u=users[key];
-    if(!u||u.hash!==await hash(pw,u.salt)){err.textContent='Wrong name or password.';return}
-    enter(key,u.name);
+    if(!dbUser || dbUser.hash !== await hash(pw, dbUser.salt)){
+      err.textContent='Wrong name or password.';
+      return;
+    }
+    enter(key, dbUser.name);
   }
 };
 ['aName','aPass','aPass2'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')$('aBtn').click()}));
+
 async function enter(key,name){
   user=key; sset('rt_session',key);
-  data=jget('rt_data_'+key,null)||{settings:{engineer:'Saied',rate:20},expenses:[]};
-  data.settings=Object.assign({engineer:'Saied',rate:20},data.settings);
   $('who').textContent=name;
-  $('auth').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('auth').classList.add('hidden');$('app').classList.remove('hidden');
   $('aPass').value='';$('aPass2').value='';
   initForm(); 
-  await loadCloudData(); // Pull latest expenses from Supabase
+  await loadCloudData();
   show('dash');
 }
 function logout(){sdel('rt_session');user=null;$('app').classList.add('hidden');$('auth').classList.remove('hidden');setAuthMode(false)}
@@ -408,20 +420,17 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{ if(b.dataset
 /* ---------- form ---------- */
 function opts(arr,first){return (first?`<option value="">${first}</option>`:'')+arr.map(a=>`<option>${esc(a)}</option>`).join('')}
 function initForm(){
-  $('f_room').innerHTML=opts(ROOMS);
-  $('f_cat').innerHTML=opts(CATS);
+  $('f_room').innerHTML=opts(ROOMS);$('f_cat').innerHTML=opts(CATS);
   const mo=Object.entries(METHODS).map(([k,m])=>`<option value="${k}">${m.name}</option>`).join('');
   $('f_method').innerHTML=mo; $('d_method').innerHTML=mo;
-  $('fl_room').innerHTML=opts(ROOMS,'All rooms'); $('fl_cat').innerHTML=opts(CATS,'All categories');
+  $('fl_room').innerHTML=opts(ROOMS,'All rooms');$('fl_cat').innerHTML=opts(CATS,'All categories');
   resetForm();
 }
 function renderMethodFields(vals){
-  const m=METHODS[$('f_method').value];
-  $('methodFields').innerHTML=`<div class="grid g2 keep">`+m.f.map((f,i)=>`<label>${f[0]}<input id="mf${i}" value="${esc(vals?vals[i]:'')}"></label>`).join('')+`</div>`;
+  const m=METHODS[$('f_method').value];$('methodFields').innerHTML=`<div class="grid g2 keep">`+m.f.map((f,i)=>`<label>${f[0]}<input id="mf${i}" value="${esc(vals?vals[i]:'')}"></label>`).join('')+`</div>`;
 }
 function updateCatLabels(){
-  const lab=$('f_cat').value==='Labor';
-  $('l_desc').firstChild.nodeValue=lab?'Job done (e.g. painting, plumbing)':'What was it?';
+  const lab=$('f_cat').value==='Labor';$('l_desc').firstChild.nodeValue=lab?'Job done (e.g. painting, plumbing)':'What was it?';
   $('l_payee').firstChild.nodeValue=lab?'Worker name':'Shop / person name';
 }
 function updateCommNote(){
@@ -430,15 +439,13 @@ function updateCommNote(){
   $('commNote').innerHTML=by==='saied'?`${esc(eng())} gets ${data.settings.rate}% on top${a?` = <b>${money(a*data.settings.rate/100)}</b>`:''}.`:'No commission when you bought it yourself.';
   document.querySelectorAll('#seg_by label').forEach(l=>l.classList.toggle('sel',l.dataset.val===by));
 }
-$('f_method').onchange=()=>renderMethodFields();
-$('f_cat').onchange=updateCatLabels;
+$('f_method').onchange=()=>renderMethodFields();$('f_cat').onchange=updateCatLabels;
 $('f_amount').oninput=updateCommNote;
 document.querySelectorAll('input[name=by]').forEach(r=>r.onchange=updateCommNote);
 function resetForm(){
   editId=null; formFiles=[]; removedFiles=[]; renderFormFiles();
-  $('formTitle').textContent='Add expense';
-  $('f_date').value=today(); $('f_amount').value=''; $('f_desc').value=''; $('f_payee').value=''; $('f_notes').value='';
-  $('f_room').selectedIndex=0; $('f_cat').selectedIndex=0; $('f_status').value='paid'; $('f_method').value='cash';
+  $('formTitle').textContent='Add expense';$('f_date').value=today(); $('f_amount').value='';$('f_desc').value=''; $('f_payee').value='';$('f_notes').value='';
+  $('f_room').selectedIndex=0; $('f_cat').selectedIndex=0; $('f_status').value='paid';$('f_method').value='cash';
   document.querySelector('input[name=by][value=me]').checked=true;
   $('fErr').textContent='';
   renderMethodFields(); updateCatLabels(); updateCommNote();
@@ -454,10 +461,12 @@ function editExpense(id){
   renderMethodFields(e.details); updateCatLabels(); updateCommNote();
   formFiles=(e.files||[]).map(f=>({...f})); removedFiles=[]; renderFormFiles();
 }
+
 async function saveExpense() {
+  const sb = initSupabase();
   const amount = parseFloat($('f_amount').value);
   if (!(amount > 0)) { $('fErr').textContent = 'Enter a valid amount.'; return; }
-  if (!$('f_desc').value.trim() && !$('f_payee').value.trim()) { $('fErr').textContent = 'Write what it was or the name.'; return; }
+  if (!$('f_desc').value.trim() && !$('f_payee').value.trim()) {$('fErr').textContent = 'Write what it was or the name.'; return; }
 
   const by = document.querySelector('input[name=by]:checked').value;
   const m = $('f_method').value;
@@ -467,6 +476,8 @@ async function saveExpense() {
   
   const expenseId = old ? old.id : uid();
   let uploadedFilesMeta = old ? [...(old.files || [])] : [];
+
+  $('fErr').textContent = 'Saving...';
 
   try {
     for (const f of formFiles) {
@@ -481,7 +492,7 @@ async function saveExpense() {
       uploadedFilesMeta = uploadedFilesMeta.filter(f => f.id !== id);
     }
   } catch (err) {
-    $('fErr').textContent = 'Error uploading files to cloud storage.';
+    $('fErr').textContent = 'Error uploading files: ' + (err.message || 'Check storage bucket permissions.');
     return;
   }
 
@@ -508,7 +519,7 @@ async function saveExpense() {
     files: uploadedFilesMeta
   };
 
-  const { error } = await supabaseClient.from('expenses').upsert(e);
+  const { error } = await sb.from('expenses').upsert(e);
   if (error) {
     $('fErr').textContent = 'Database error: ' + error.message;
     return;
@@ -522,20 +533,30 @@ async function saveExpense() {
 
 async function delExpense(id) {
   if (!confirm('Delete this expense (and its attached files)?')) return;
+  const sb = initSupabase();
   const e = data.expenses.find(x => x.id === id);
   if (e && e.files) {
     for (const f of e.files) {
       if (f.url) await fdel(f.url);
     }
   }
-  await supabaseClient.from('expenses').delete().eq('id', id);
+  await sb.from('expenses').delete().eq('id', id);
   await loadCloudData();
   rerender();
 }
 
 async function loadCloudData() {
   if (!user) return;
-  const { data: dbExpenses, error } = await supabaseClient
+  const sb = initSupabase();
+
+  // Load Settings
+  const { data: dbUser } = await sb.from('users').select('settings').eq('key', user).maybeSingle();
+  if (dbUser && dbUser.settings) {
+    data.settings = Object.assign({ engineer: 'Saied', rate: 20 }, dbUser.settings);
+  }
+
+  // Load Expenses
+  const { data: dbExpenses, error } = await sb
     .from('expenses')
     .select('*')
     .eq('user_id', user);
@@ -627,7 +648,7 @@ function itemHTML(e,opt={}){
     <div class="muted">${esc(e.date)} · ${esc(e.room)} · ${esc(e.category)} · ${methodText(e)}</div>
     <div style="margin-top:4px"><span class="badge ${st}">${STATUS_LABEL[e.status].replace('Saied',esc(eng()))}</span>
     ${e.boughtBy==='saied'?`<span class="badge b-muted">Bought by ${esc(eng())}</span>`:''}
-    ${e.commission?`<span class="badge ${e.commPaid?'b-good':'b-warn'}">Commission ${money(e.commission)} ${e.commPaid?'paid':'unpaid'}</span>`:''}</div>
+    ${e.commission?`<span class="badge ${e.commPaid?'b-good':'b-warn'}">Commission ${money(e.commission)}${e.commPaid?'paid':'unpaid'}</span>`:''}</div>
     ${e.notes?`<div class="muted" style="margin-top:4px">📝 ${esc(e.notes)}</div>`:''}
     ${(e.files&&e.files.length)?`<div class="chips">${e.files.map(f=>`<button class="small chipbtn" onclick="openFile('${f.id}')">📎 <span>${esc(f.name)}</span></button>`).join('')}</div>`:''}
     </div><div class="amt">${money(e.amount)}</div></div><div class="actions">`;
@@ -674,21 +695,50 @@ function openSettle(id,kind){
   settleT={id,kind};
   const e=data.expenses.find(x=>x.id===id);
   $('d_date').value=today();
-  $('d_method').value=kind==='comm'||kind==='allsaied'?'cash':(e&&e.method)||'cash';
-  $('dTitle').textContent=kind==='comm'?'Pay commission':kind==='allsaied'?`Pay ${eng()} everything`:'Mark as paid';
+  $('d_method').value=kind==='comm'\vert{}\vert{}kind==='allsaied'?'cash':(e&&e.method)\vert{}\vert{}'cash';$('dTitle').textContent=kind==='comm'?'Pay commission':kind==='allsaied'?`Pay ${eng()} everything`:'Mark as paid';
   $('dInfo').textContent=kind==='allsaied'?`Marks all items he paid for and all his unpaid commission as paid (${money(totals(data.expenses).owedSaied)}).`
     :kind==='comm'?`${money(e.commission)} commission to ${eng()}`:`${money(e.amount)} — ${e.status==='saied'?'to '+eng():'to '+(e.payee||'shop')}`;
   $('dlg').classList.remove('hidden');
 }
 function closeDlg(){$('dlg').classList.add('hidden');settleT=null}
-function confirmSettle(){
-  const {id,kind}=settleT, d=$('d_date').value||today(), m=$('d_method').value;
-  const doItem=e=>{e.status='paid';e.settledDate=d;e.method=m};
-  const doComm=e=>{e.commPaid=true;e.commDate=d;e.commMethod=m};
-  if(kind==='allsaied'){data.expenses.forEach(e=>{if(e.status==='saied')doItem(e);if(e.commission&&!e.commPaid)doComm(e)})}
-  else{const e=data.expenses.find(x=>x.id===id);if(e)kind==='comm'?doComm(e):doItem(e)}
-  save();closeDlg();rerender();
+
+async function confirmSettle(){
+  const sb = initSupabase();
+  const {id,kind}=settleT, d=$('d_date').value\vert{}\vert{}today(), m=$('d_method').value;
+
+  const affectedExpenses = [];
+  const doItem=e=>{e.status='paid';e.settledDate=d;e.method=m;affectedExpenses.push(e)};
+  const doComm=e=>{e.commPaid=true;e.commDate=d;e.commMethod=m;affectedExpenses.push(e)};
+
+  if(kind==='allsaied'){
+    data.expenses.forEach(e=>{
+      let modified = false;
+      if(e.status==='saied'){ e.status='paid';e.settledDate=d;e.method=m; modified=true; }
+      if(e.commission&&!e.commPaid){ e.commPaid=true;e.commDate=d;e.commMethod=m; modified=true; }
+      if(modified) affectedExpenses.push(e);
+    });
+  } else {
+    const e=data.expenses.find(x=>x.id===id);
+    if(e) kind==='comm' ? doComm(e) : doItem(e);
+  }
+
+  // Update in cloud
+  for(const e of affectedExpenses) {
+    await sb.from('expenses').update({
+      status: e.status,
+      settled_date: e.settledDate,
+      method: e.method,
+      comm_paid: e.commPaid,
+      comm_date: e.commDate,
+      comm_method: e.commMethod
+    }).eq('id', e.id);
+  }
+
+  await loadCloudData();
+  closeDlg();
+  rerender();
 }
+
 function rerender(){
   if(!$('v-dash').classList.contains('hidden'))renderDash();
   if(!$('v-list').classList.contains('hidden'))renderList();
@@ -696,37 +746,96 @@ function rerender(){
 }
 
 /* ---------- settings / export ---------- */
-function saveSettings(){
+async function saveSettings(){
   data.settings.engineer=$('s_name').value.trim()||'Saied';
   data.settings.rate=Math.max(0,parseFloat($('s_rate').value)||0);
-  save();alert('Saved ✅');updateCommNote();
+
+  const sb = initSupabase();
+  if (user) {
+    await sb.from('users').update({ settings: data.settings }).eq('key', user);
+  }
+
+  alert('Saved ✅');
+  updateCommNote();
 }
+
 function download(name,text,type){saveOut(name,text)}
+
 function exportCSV(){
   const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
   const head=['Date','Room','Category','Item / Job','Shop / Person','Amount LYD','Bought by','Commission %','Commission LYD','Commission paid','Status','Method','Details','Settled date','Notes'];
   const rows=data.expenses.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(e=>[e.date,e.room,e.category,e.desc,e.payee,e.amount,e.boughtBy==='me'?'Me':eng(),e.boughtBy==='saied'?e.rate:'',e.commission||'',e.commission?(e.commPaid?'Yes':'No'):'',STATUS_LABEL[e.status],METHODS[e.method]?.name,(e.details||[]).join(' / '),e.settledDate,e.notes].map(q).join(','));
   download('renovation-expenses.csv','\ufeff'+[head.map(q).join(','),...rows].join('\n'),'text/csv;charset=utf-8');
 }
+
 function exportJSON(){download('renovation-backup-'+today()+'.json',JSON.stringify(data,null,1),'application/json')}
+
 $('impFile').onchange=ev=>{
   const f=ev.target.files[0];if(!f)return;
   const r=new FileReader();
-  r.onload=()=>{try{
+  r.onload=async()=>{try{
     const d=JSON.parse(r.result);
     if(!Array.isArray(d.expenses))throw 0;
     if(!confirm('Replace your current data with this backup?'))return;
-    data=d;data.settings=Object.assign({engineer:'Saied',rate:20},d.settings);save();show('dash');
+    data=d;
+    data.settings=Object.assign({engineer:'Saied',rate:20},d.settings);
+    
+    // Save imported to cloud
+    const sb = initSupabase();
+    for (const e of data.expenses) {
+      await sb.from('expenses').upsert({
+        id: e.id,
+        user_id: user,
+        date: e.date,
+        amount: e.amount,
+        room: e.room,
+        category: e.category,
+        description: e.desc,
+        payee: e.payee,
+        bought_by: e.boughtBy,
+        rate: e.rate,
+        commission: e.commission,
+        comm_paid: e.commPaid,
+        comm_method: e.commMethod,
+        comm_date: e.commDate,
+        status: e.status,
+        method: e.method,
+        details: e.details,
+        notes: e.notes,
+        settled_date: e.settledDate,
+        files: e.files || []
+      });
+    }
+    await loadCloudData();
+    show('dash');
   }catch(e){alert('This file is not a valid backup.')}};
   r.readAsText(f);ev.target.value='';
 };
-function wipe(){if(confirm('Delete ALL expenses and files? This cannot be undone.')&&confirm('Really sure?')){data.expenses.forEach(e=>(e.files||[]).forEach(f=>fdel(f.id)));data.expenses=[];save();show('dash')}}
+
+async function wipe(){
+  if(confirm('Delete ALL expenses and files? This cannot be undone.')&&confirm('Really sure?')){
+    const sb = initSupabase();
+    for (const e of data.expenses) {
+      for (const f of (e.files || [])) {
+        if (f.url) await fdel(f.url);
+      }
+    }
+    await sb.from('expenses').delete().eq('user_id', user);
+    await loadCloudData();
+    show('dash');
+  }
+}
 
 /* ---------- start ---------- */
 (function(){
-  const s=sget('rt_session'), users=jget('rt_users',{});
-  if(s&&users[s])enter(s,users[s].name);
-  else{ $('auth').classList.remove('hidden'); setAuthMode(Object.keys(users).length===0) }
+  initSupabase();
+  const s=sget('rt_session');
+  if(s){
+    enter(s, s);
+  } else {
+    $('auth').classList.remove('hidden');
+    setAuthMode(false);
+  }
 })();
 </script>  
 </body>
