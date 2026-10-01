@@ -110,7 +110,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
 <div id="app" class="wrap hidden">
   <div class="top">
     <h1 style="font-size:19px">🏠 Renovation Tracker</h1>
-    <div><span class="muted" id="who"></span> <button class="small" onclick="logout()">Log out</button></div>
+    <div><span class="muted" id="syncStat" style="font-size:12px"></span> <span class="muted" id="who"></span> <button class="small" onclick="logout()">Log out</button></div>
   </div>
 
   <nav id="nav">
@@ -206,7 +206,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
     </div>
     <div class="card">
       <h2>Backup</h2>
-      <p class="muted">Download a local backup of your expenses.</p>
+      <p class="muted">Your expenses and files are saved in your Supabase cloud. You can also download a backup copy here.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="exportJSON()">⬇ Download backup</button>
         <button onclick="document.getElementById('impFile').click()">⬆ Restore backup</button>
@@ -275,131 +275,248 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 const eng=()=>data.settings.engineer||'Saied';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
-/* ---------- Supabase Cloud Configuration ---------- */
+/* ---------- Supabase configuration ---------- */
 const SUPABASE_URL = 'https://oerrbarwufepovjqplbw.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcnJiYXJ3dWZlcG92anFwbGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA5Mjg0NzksImV4cCI6MjA1NjUwNDQ3OX0.12345';
-let supabaseClient = null;
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcnJiYXJ3dWZlcG92anFwbGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NzI3ODgsImV4cCI6MjEwNjQ0ODc4OH0.4QLkzC9iJK7OSjOfxtCsb0uXvDXV310yVzBkJSsMht0';   // <-- paste your Supabase "anon public" (or "publishable") key between the quotes
+const BUCKET = 'invoices';      // storage bucket for invoices / receipts
+const TABLE  = 'tracker_data';  // table holding each user's expenses
 
-function initSupabase() {
-  if (window.supabase && !supabaseClient) {
-    try {
-      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    } catch(e) {}
-  }
-  return supabaseClient;
+let sbClient = null;
+function getSB() {
+  if (sbClient) return sbClient;
+  if (!window.supabase) return null;
+  if (!SUPABASE_KEY || SUPABASE_KEY.indexOf('PASTE_') !== -1) return null;
+  try { sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); } catch (e) {}
+  return sbClient;
 }
 
-/* ---------- file storage (IndexedDB, with in-memory fallback) ---------- */
-let idb=null, idbTried=false; const memFiles=new Map();
-function dbOpen(){return new Promise(res=>{try{const r=indexedDB.open('rt_files',1);r.onupgradeneeded=()=>r.result.createObjectStore('f');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);r.onblocked=()=>res(null)}catch(e){res(null)}})}
-async function getDB(){if(!idbTried){idbTried=true;idb=await dbOpen()}return idb}
-async function fput(id,blob){const d=await getDB();if(!d){memFiles.set(id,blob);return}
-  return new Promise((res,rej)=>{const tx=d.transaction('f','readwrite');tx.objectStore('f').put(blob,id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)})}
-async function fget(id){const d=await getDB();if(!d)return memFiles.get(id)||null;
-  return new Promise(res=>{try{const r=d.transaction('f').objectStore('f').get(id);r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null)}catch(e){res(null)}})}
-async function fdel(id){const d=await getDB();if(!d){memFiles.delete(id);return}
-  return new Promise(res=>{try{const tx=d.transaction('f','readwrite');tx.objectStore('f').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>res()}catch(e){res()}})}
-async function saveOut(name,data){
-  try{const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch(e){}
-}
-function renderFormFiles(){
-  $('fileList').innerHTML=formFiles.map((f,i)=>`<span class="chip">📎 <span class="n">${esc(f.name)}</span><span class="s">${fsize(f.size)}</span><button type="button" class="x" onclick="removeFormFile(${i})" aria-label="Remove">✕</button></span>`).join('');
-}
-function removeFormFile(i){const f=formFiles[i];if(f&&!f.blob)removedFiles.push(f.id);formFiles.splice(i,1);renderFormFiles()}
-$('f_files').onchange=ev=>{
-  [...ev.target.files].forEach(file=>formFiles.push({id:uid(),name:file.name,type:file.type||'',size:file.size,blob:file}));
-  ev.target.value='';renderFormFiles();
+let formFiles = [], removedFiles = [], saving = false, legacyKey = '';
+const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+const extOf = n => { const m = /\.([A-Za-z0-9]{1,8})$/.exec(n || ''); return m ? '.' + m[1].toLowerCase() : ''; };
+const normalize = d => {
+  d = (d && typeof d === 'object') ? d : {};
+  d.settings = Object.assign({ engineer: 'Saied', rate: 20 }, d.settings);
+  if (!Array.isArray(d.expenses)) d.expenses = [];
+  return d;
 };
-let viewerUrl=null;
-async function openFile(id){
-  let meta=null;data.expenses.some(e=>(e.files||[]).some(f=>f.id===id&&(meta=f)));
-  if(!meta)return;
-  const blob=await fget(id);
-  if(!blob){alert('This file is not stored on this device.');return}
-  const isImg=(meta.type||'').startsWith('image/')&&!/heic|heif|tiff/i.test(meta.type);
-  if(!isImg){await saveOut(meta.name,blob);return}
-  if(viewerUrl)URL.revokeObjectURL(viewerUrl);
-  viewerUrl=URL.createObjectURL(blob);
-  $('vName').textContent=meta.name;$('vImg').src=viewerUrl;
-  $('vSave').onclick=()=>saveOut(meta.name,blob);
+const parseJSON = r => { try { return r ? JSON.parse(r) : null; } catch (e) { return null; } };
+
+/* ---------- cloud sync of expenses ---------- */
+let syncTimer = null;
+function setStat(t, bad) { const el = $('syncStat'); if (el) { el.textContent = t; el.style.color = bad ? 'var(--bad)' : ''; } }
+
+function saveLocalData() {
+  if (!user) return;
+  sset('rt_data_' + user, JSON.stringify(data));
+  sset('rt_dirty_' + user, '1');
+  setStat('Saving…');
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(pushCloud, 600);
+}
+async function pushCloud() {
+  const c = getSB(); if (!c || !user) return;
+  const snap = JSON.stringify(data);
+  try {
+    const { error } = await c.from(TABLE).upsert({ user_id: user, data: data, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    if (JSON.stringify(data) === snap) sdel('rt_dirty_' + user);
+    setStat('☁ Synced');
+  } catch (e) { console.warn(e); setStat('⚠ Not synced', true); }
+}
+async function loadData() {
+  data = normalize(null);
+  const c = getSB();
+  const dirty = sget('rt_dirty_' + user);
+  const local = parseJSON(sget('rt_data_' + user));
+  let cloud = null, ok = false;
+  if (c) {
+    try {
+      const { data: row, error } = await c.from(TABLE).select('data').eq('user_id', user).maybeSingle();
+      if (error) throw error;
+      cloud = row ? row.data : null; ok = true;
+    } catch (e) { console.warn(e); setStat('⚠ Offline - using saved copy', true); }
+  }
+  let chosen = null, fromCloud = false;
+  if (ok && cloud && !dirty) { chosen = cloud; fromCloud = true; }
+  else if (local) chosen = local;
+  else if (cloud) { chosen = cloud; fromCloud = true; }
+  else {
+    // data from the older single-device version, saved under the same user name
+    chosen = parseJSON(sget('rt_data_' + legacyKey));
+  }
+  data = normalize(chosen);
+  if (ok && !fromCloud && (data.expenses.length || !cloud)) { sset('rt_dirty_' + user, '1'); pushCloud(); }
+  else if (ok) setStat('☁ Synced');
+  sset('rt_data_' + user, JSON.stringify(data));
+}
+async function syncDown() {
+  const c = getSB(); if (!c || !user) return;
+  if (sget('rt_dirty_' + user)) { pushCloud(); return; }
+  try {
+    const { data: row, error } = await c.from(TABLE).select('data').eq('user_id', user).maybeSingle();
+    if (error || !row) return;
+    if (JSON.stringify(row.data) !== JSON.stringify(data)) {
+      data = normalize(row.data);
+      sset('rt_data_' + user, JSON.stringify(data));
+      rerender();
+    }
+    setStat('☁ Synced');
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncDown(); });
+window.addEventListener('online', () => syncDown());
+
+/* ---------- old on-device file storage (only used to move old files to the cloud) ---------- */
+let idb = null, idbTried = false;
+function dbOpen() { return new Promise(res => { try { const r = indexedDB.open('rt_files', 1); r.onupgradeneeded = () => r.result.createObjectStore('f'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null); } catch (e) { res(null); } }); }
+async function getDB() { if (!idbTried) { idbTried = true; idb = await dbOpen(); } return idb; }
+async function fget(id) { const d = await getDB(); if (!d) return null; return new Promise(res => { try { const r = d.transaction('f').objectStore('f').get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); } catch (e) { res(null); } }); }
+async function fdel(id) { const d = await getDB(); if (!d) return; return new Promise(res => { try { const tx = d.transaction('f', 'readwrite'); tx.objectStore('f').delete(id); tx.oncomplete = () => res(); tx.onerror = () => res(); } catch (e) { res(); } }); }
+
+/* ---------- files in Supabase Storage ---------- */
+async function uploadFile(f) {
+  const c = getSB();
+  const path = user + '/' + f.id + extOf(f.name);
+  const { error } = await c.storage.from(BUCKET).upload(path, f.blob, { contentType: f.type || 'application/octet-stream', upsert: false });
+  if (error) throw error;
+  return path;
+}
+async function removeCloudFiles(files) {
+  const paths = [];
+  files.forEach(f => { if (f.path) paths.push(f.path); else fdel(f.id); });
+  const c = getSB();
+  if (paths.length && c) { try { await c.storage.from(BUCKET).remove(paths); } catch (e) { console.warn(e); } }
+}
+async function migrateLegacyFiles() {
+  const c = getSB(); if (!c || !user) return;
+  let changed = false;
+  for (const e of data.expenses) for (const f of (e.files || [])) if (!f.path) {
+    try {
+      const blob = await fget(f.id); if (!blob) continue;
+      f.path = await uploadFile({ id: f.id, name: f.name, type: f.type, blob }); changed = true;
+    } catch (err) {}
+  }
+  if (changed) { saveLocalData(); rerender(); }
+}
+function renderFormFiles() {
+  $('fileList').innerHTML = formFiles.map((f, i) => `<span class="chip">📎 <span class="n">${esc(f.name)}</span><span class="s">${fsize(f.size)}</span><button type="button" class="x" onclick="removeFormFile(${i})" aria-label="Remove">✕</button></span>`).join('');
+}
+function removeFormFile(i) { const f = formFiles[i]; if (f && !f.blob) removedFiles.push(f); formFiles.splice(i, 1); renderFormFiles(); }
+$('f_files').onchange = ev => {
+  [...ev.target.files].forEach(file => formFiles.push({ id: uid(), name: file.name, type: file.type || '', size: file.size, blob: file }));
+  ev.target.value = ''; renderFormFiles();
+};
+let viewerUrl = null;
+function showViewer(meta, url, saveFn, isBlobUrl) {
+  if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; }
+  if (isBlobUrl) viewerUrl = url;
+  $('vName').textContent = meta.name; $('vImg').src = url; $('vSave').onclick = saveFn;
   $('viewer').classList.remove('hidden');
 }
-function closeViewer(){$('viewer').classList.add('hidden');$('vImg').removeAttribute('src');if(viewerUrl){URL.revokeObjectURL(viewerUrl);viewerUrl=null}}
-
-let formFiles = [], removedFiles = [];
-const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
-
-/* ---------- auth ---------- */
-let regMode=false;
-async function hash(pw,salt){
-  try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(salt+pw));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
-  catch(e){return btoa(unescape(encodeURIComponent(salt+pw)))}
+function closeViewer() { $('viewer').classList.add('hidden'); $('vImg').removeAttribute('src'); if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; } }
+async function downloadCloud(meta) {
+  const c = getSB();
+  const { data: s, error } = await c.storage.from(BUCKET).createSignedUrl(meta.path, 300, { download: meta.name });
+  if (error || !s) { alert('Could not open the file: ' + (error ? error.message : 'unknown error')); return; }
+  const a = document.createElement('a'); a.href = s.signedUrl; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
 }
-function setAuthMode(r){
-  regMode=r;
-  $('aPass2Wrap').classList.toggle('hidden',!r);
-  $('aBtn').textContent=r?'Register':'Log in';$('aSwitch').textContent=r?'Have an account? Log in':'No account? Register';
-  $('authSub').textContent=r?'Create your account.':'Log in to see your expenses.';$('aErr').textContent='';
+async function openFile(id) {
+  let meta = null; data.expenses.some(e => (e.files || []).some(f => f.id === id && (meta = f)));
+  if (!meta) return;
+  const isImg = (meta.type || '').startsWith('image/') && !/heic|heif|tiff/i.test(meta.type);
+  if (meta.path) {
+    const c = getSB(); if (!c) { alert('Not connected to Supabase.'); return; }
+    if (!isImg) { await downloadCloud(meta); return; }
+    const { data: s, error } = await c.storage.from(BUCKET).createSignedUrl(meta.path, 3600);
+    if (error || !s) { alert('Could not open the file: ' + (error ? error.message : 'unknown error')); return; }
+    showViewer(meta, s.signedUrl, () => downloadCloud(meta), false);
+    return;
+  }
+  const blob = await fget(id);
+  if (!blob) { alert('This file is not available on this device.'); return; }
+  const url = URL.createObjectURL(blob);
+  const save = () => { const a = document.createElement('a'); a.href = url; a.download = meta.name; document.body.appendChild(a); a.click(); a.remove(); };
+  if (isImg) showViewer(meta, url, save, true); else save();
 }
-$('aSwitch').onclick=e=>{e.preventDefault();setAuthMode(!regMode)};
+
+/* ---------- auth (Supabase Auth: same account on every device) ---------- */
+let regMode = false;
+function setAuthMode(r) {
+  regMode = r;
+  $('aPass2Wrap').classList.toggle('hidden', !r);
+  $('aBtn').textContent = r ? 'Register' : 'Log in';
+  $('aSwitch').textContent = r ? 'Have an account? Log in' : 'No account? Register';
+  $('authSub').textContent = r ? 'Create your account (password at least 6 characters).' : 'Log in to see your expenses.';
+  $('aErr').textContent = '';
+}
+$('aSwitch').onclick = e => { e.preventDefault(); setAuthMode(!regMode); };
+
+// the user name is turned into a private login id for Supabase
+function toEmail(name) {
+  const k = name.trim().toLowerCase();
+  const local = /^[a-z0-9][a-z0-9._-]{0,39}$/.test(k) ? k : 'u' + [...new TextEncoder().encode(k)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 60);
+  return local + '@renovation-tracker.app';
+}
+const CONFIRM_MSG = 'Supabase is asking for email confirmation. In Supabase go to Authentication → Sign In / Providers → Email, turn OFF "Confirm email", delete this user under Authentication → Users, then register again.';
+function niceErr(e) {
+  const m = (e && e.message) ? e.message : String(e);
+  if (/invalid login/i.test(m)) return 'Wrong name or password.';
+  if (/already registered|already been registered/i.test(m)) return 'This name already exists. Tap "Have an account? Log in".';
+  if (/not confirmed/i.test(m)) return CONFIRM_MSG;
+  if (/at least 6|weak/i.test(m)) return 'Password must be at least 6 characters.';
+  if (/rate limit|too many/i.test(m)) return 'Too many attempts. Wait a minute and try again.';
+  if (/invalid api key|apikey/i.test(m)) return 'The Supabase key in index.html is wrong. Paste the "anon public" key from Supabase → Project Settings → API.';
+  if (/failed to fetch|network/i.test(m)) return 'No connection to Supabase. Check your internet.';
+  return m;
+}
 
 $('aBtn').onclick = async () => {
   const name = $('aName').value.trim(), pw = $('aPass').value, err = $('aErr');
-  const key = name.toLowerCase();
   if (!name || !pw) { err.textContent = 'Enter name and password.'; return; }
-  err.textContent = 'Please wait...';
-  try {
-    const localUsers = JSON.parse(sget('rt_local_users') || '{}');
-    // Cloud lookup is optional: it must never block the login
-    let dbUser = null;
-    const sb = initSupabase();
-    if (sb) {
-      try {
-        const res = await Promise.race([
-          sb.from('users').select('*').eq('key', key).maybeSingle(),
-          new Promise(r => setTimeout(() => r(null), 4000))
-        ]);
-        if (res && !res.error) dbUser = res.data;
-      } catch (e) {}
-    }
-
-    if (regMode) {
-      if (pw.length < 4) { err.textContent = 'Password must be at least 4 characters.'; return; }
-      if (pw !== $('aPass2').value) { err.textContent = 'Passwords do not match.'; return; }
-      if (dbUser || localUsers[key]) { err.textContent = 'This name already exists. Try logging in.'; return; }
-      const salt = uid();
-      const userHash = await hash(pw, salt);
-      localUsers[key] = { key, name, salt, hash: userHash };
-      sset('rt_local_users', JSON.stringify(localUsers));
-      if (sb) { try { await sb.from('users').insert({ key, name, salt, hash: userHash }); } catch (e) {} }
-      err.textContent = '';
-      enter(key, name);
-    } else {
-      const target = localUsers[key] || dbUser;
-      if (!target) { err.textContent = 'No account with this name. Tap "No account? Register" below.'; return; }
-      if (target.hash !== await hash(pw, target.salt)) { err.textContent = 'Wrong password.'; return; }
-      localUsers[key] = { key, name: target.name, salt: target.salt, hash: target.hash };
-      sset('rt_local_users', JSON.stringify(localUsers));
-      err.textContent = '';
-      enter(key, target.name);
-    }
-  } catch (e) {
-    err.textContent = 'Something went wrong: ' + (e && e.message ? e.message : e);
+  const c = getSB();
+  if (!c) {
+    err.textContent = window.supabase
+      ? 'The Supabase key is not set yet. Open index.html, find SUPABASE_KEY near the top of the script and paste your key.'
+      : 'Could not load Supabase. Check your internet connection and reload the page.';
+    return;
   }
+  const email = toEmail(name);
+  err.textContent = 'Please wait...'; $('aBtn').disabled = true;
+  try {
+    if (regMode) {
+      if (pw.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
+      if (pw !== $('aPass2').value) { err.textContent = 'Passwords do not match.'; return; }
+      const { data: r, error } = await c.auth.signUp({ email, password: pw, options: { data: { name } } });
+      if (error) throw error;
+      if (!r.session) { err.textContent = CONFIRM_MSG; return; }
+      err.textContent = '';
+      enter(r.user, name);
+    } else {
+      const { data: r, error } = await c.auth.signInWithPassword({ email, password: pw });
+      if (error) throw error;
+      err.textContent = '';
+      enter(r.user, (r.user.user_metadata && r.user.user_metadata.name) || name);
+    }
+  } catch (e) { err.textContent = niceErr(e); }
+  finally { $('aBtn').disabled = false; }
 };
+['aName', 'aPass', 'aPass2'].forEach(i => $(i).addEventListener('keydown', e => { if (e.key === 'Enter') $('aBtn').click(); }));
 
-['aName','aPass','aPass2'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key==='Enter')$('aBtn').click()}));
-
-async function enter(key,name){
-  user=key; sset('rt_session',key);
-  $('who').textContent=name;
-  $('auth').classList.add('hidden');$('app').classList.remove('hidden');
-  $('aPass').value='';$('aPass2').value='';
-  initForm(); 
+async function enter(u, name) {
+  user = u.id; legacyKey = String(name || '').trim().toLowerCase();
+  $('who').textContent = name;
+  $('auth').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('aPass').value = ''; $('aPass2').value = '';
+  initForm();
   await loadData();
   show('dash');
+  migrateLegacyFiles();
 }
-function logout(){sdel('rt_session');user=null;$('app').classList.add('hidden');$('auth').classList.remove('hidden');setAuthMode(false)}
+async function logout() {
+  try { const c = getSB(); if (c) await c.auth.signOut(); } catch (e) {}
+  user = null; data = normalize(null); setStat('');
+  $('app').classList.add('hidden'); $('auth').classList.remove('hidden'); setAuthMode(false);
+}
 
 /* ---------- navigation ---------- */
 function show(v){
@@ -479,11 +596,22 @@ async function saveExpense() {
     settledDate: old ? old.settledDate : ''
   };
 
-  e.files = formFiles.map(f => ({ id: f.id, name: f.name, type: f.type, size: f.size }));
+  if (saving) return;
+  saving = true;
+  $('fErr').textContent = formFiles.some(f => f.blob) ? 'Uploading files...' : '';
   try {
-    for (const f of formFiles) { if (f.blob) await fput(f.id, f.blob); }
-    for (const id of removedFiles) { await fdel(id); }
-  } catch (err) { $('fErr').textContent = 'Could not store the files on this device (storage may be full).'; return; }
+    const metas = [];
+    for (const f of formFiles) {
+      if (f.blob) { f.path = await uploadFile(f); delete f.blob; }
+      metas.push({ id: f.id, name: f.name, type: f.type, size: f.size, path: f.path });
+    }
+    await removeCloudFiles(removedFiles);
+    e.files = metas;
+  } catch (err) {
+    $('fErr').textContent = 'Could not upload the files: ' + (err && err.message ? err.message : err) + ' (see the Supabase setup steps)';
+    saving = false; return;
+  }
+  saving = false;
 
   if (old) {
     const idx = data.expenses.findIndex(x => x.id === editId);
@@ -508,23 +636,6 @@ function editExpense(id){
   document.querySelector(`input[name=by][value=${e.boughtBy}]`).checked=true;
   renderMethodFields(e.details); updateCatLabels(); updateCommNote();
   formFiles=(e.files||[]).map(f=>({...f})); removedFiles=[]; renderFormFiles();
-}
-
-function saveLocalData() {
-  sset('rt_data_' + user, JSON.stringify(data));
-}
-
-async function loadData() {
-  if (!user) return;
-  data = { settings: { engineer: 'Saied', rate: 20 }, expenses: [] };
-  const raw = sget('rt_data_' + user);
-  if (raw) {
-    try {
-      data = JSON.parse(raw);
-      data.settings = Object.assign({engineer:'Saied',rate:20}, data.settings);
-      if (!Array.isArray(data.expenses)) data.expenses = [];
-    } catch(e) {}
-  }
 }
 
 /* ---------- calculations ---------- */
@@ -665,7 +776,7 @@ function confirmSettle(){
 
 function delExpense(id){
   if(!confirm('Delete this expense (and its attached files)?'))return;
-  const ex=data.expenses.find(x=>x.id===id); if(ex)(ex.files||[]).forEach(f=>fdel(f.id));
+  const ex=data.expenses.find(x=>x.id===id); if(ex)removeCloudFiles(ex.files||[]);
   data.expenses=data.expenses.filter(x=>x.id!==id);
   saveLocalData();
   rerender();
@@ -716,7 +827,7 @@ $('impFile').onchange=ev=>{
 
 function wipe(){
   if(confirm('Delete ALL expenses? This cannot be undone.')&&confirm('Really sure?')){
-    data.expenses.forEach(e=>(e.files||[]).forEach(f=>fdel(f.id)));
+    data.expenses.forEach(e=>removeCloudFiles(e.files||[]));
     data.expenses=[];
     saveLocalData();
     show('dash');
@@ -724,15 +835,15 @@ function wipe(){
 }
 
 /* ---------- start ---------- */
-window.addEventListener('DOMContentLoaded', () => {
-  const s = sget('rt_session');
-  const lu = JSON.parse(sget('rt_local_users') || '{}');
-  if (s && lu[s]) {
-    enter(s, lu[s].name);
-  } else {
-    $('auth').classList.remove('hidden');
-    setAuthMode(false);
-  }
+window.addEventListener('DOMContentLoaded', async () => {
+  $('auth').classList.remove('hidden');
+  setAuthMode(false);
+  const c = getSB();
+  if (!c) return;
+  try {
+    const { data: r } = await c.auth.getSession();
+    if (r && r.session) enter(r.session.user, (r.session.user.user_metadata && r.session.user.user_metadata.name) || 'You');
+  } catch (e) {}
 });
 </script>  
 </body>
