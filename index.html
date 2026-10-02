@@ -88,12 +88,14 @@ h3{font-size:15px;margin-bottom:6px}
 button.chipbtn{border-radius:99px;padding:5px 11px;font-size:13px;max-width:100%}
 button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 </style>
+<script>try{var t=localStorage.getItem('rt_theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>  
 </head>
 <body>
 
 <!-- AUTH -->
 <div id="auth" class="auth">
+  <div style="text-align:right;margin-bottom:8px"><button class="small themeBtn2" onclick="toggleTheme()" aria-label="Switch light or dark mode">🌙</button></div>
   <div class="card">
     <h2 id="authTitle">🏠 Renovation Tracker</h2>
     <p class="muted" id="authSub">Log in to see your expenses.</p>
@@ -110,7 +112,7 @@ button.chipbtn span{display:inline-block;max-width:170px;overflow:hidden;text-ov
 <div id="app" class="wrap hidden">
   <div class="top">
     <h1 style="font-size:19px">🏠 Renovation Tracker</h1>
-    <div><span class="muted" id="syncStat" style="font-size:12px"></span> <span class="muted" id="who"></span> <button class="small" onclick="logout()">Log out</button></div>
+    <div><span class="muted" id="syncStat" style="font-size:12px"></span> <span class="muted" id="who"></span> <button class="small" id="themeBtn" onclick="toggleTheme()" title="Switch light / dark" aria-label="Switch light or dark mode">🌙</button> <button class="small" onclick="logout()">Log out</button></div>
   </div>
 
   <nav id="nav">
@@ -275,9 +277,27 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 const eng=()=>data.settings.engineer||'Saied';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
+/* ---------- light / dark mode ---------- */
+function currentTheme(){
+  const t=document.documentElement.getAttribute('data-theme');
+  if(t==='light'||t==='dark')return t;
+  return (window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
+}
+function paintThemeBtns(){
+  const dark=currentTheme()==='dark';
+  document.querySelectorAll('#themeBtn,.themeBtn2').forEach(b=>{b.textContent=dark?'☀️':'🌙';b.title=dark?'Switch to light mode':'Switch to dark mode'});
+}
+function toggleTheme(){
+  const next=currentTheme()==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',next);
+  try{localStorage.setItem('rt_theme',next)}catch(e){}
+  paintThemeBtns();
+}
+paintThemeBtns();
+
 /* ---------- Supabase configuration ---------- */
 const SUPABASE_URL = 'https://oerrbarwufepovjqplbw.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcnJiYXJ3dWZlcG92anFwbGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NzI3ODgsImV4cCI6MjEwNjQ0ODc4OH0.4QLkzC9iJK7OSjOfxtCsb0uXvDXV310yVzBkJSsMht0';   // <-- paste your Supabase "anon public" (or "publishable") key between the quotes
+const SUPABASE_KEY = 'PASTE_YOUR_ANON_PUBLIC_KEY_HERE';   // <-- paste your Supabase "anon public" (or "publishable") key between the quotes
 const BUCKET = 'invoices';      // storage bucket for invoices / receipts
 const TABLE  = 'tracker_data';  // table holding each user's expenses
 
@@ -464,7 +484,8 @@ function niceErr(e) {
   if (/already registered|already been registered/i.test(m)) return 'This name already exists. Tap "Have an account? Log in".';
   if (/not confirmed/i.test(m)) return CONFIRM_MSG;
   if (/at least 6|weak/i.test(m)) return 'Password must be at least 6 characters.';
-  if (/rate limit|too many/i.test(m)) return 'Too many attempts. Wait a minute and try again.';
+  if (/email rate limit/i.test(m)) return 'Supabase tried to send a confirmation email and hit its hourly email limit. Turn OFF "Confirm email" in Supabase (Authentication → Sign In / Providers → Email), then try again in about an hour or with a new name.';
+  if (/rate limit|too many/i.test(m)) return 'Too many attempts. Wait a few minutes and try again.';
   if (/invalid api key|apikey/i.test(m)) return 'The Supabase key in index.html is wrong. Paste the "anon public" key from Supabase → Project Settings → API.';
   if (/failed to fetch|network/i.test(m)) return 'No connection to Supabase. Check your internet.';
   return m;
